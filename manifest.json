@@ -1,0 +1,10 @@
+{
+  "domain": "sigen_smartport",
+  "name": "Sigenergy Smart Port",
+  "documentation": "https://github.com/yourusername/sigen_smartport",
+  "dependencies": [],
+  "codeowners": [],
+  "version": "1.0.0",
+  "iot_class": "cloud_polling",
+  "requirements": []
+}
