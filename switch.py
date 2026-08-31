@@ -1,19 +1,26 @@
 import logging
-import requests
-import json
+from datetime import timedelta
+
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
+
 from homeassistant.components.switch import SwitchEntity, PLATFORM_SCHEMA
 from homeassistant.const import CONF_NAME, CONF_USERNAME, CONF_PASSWORD
+
+from .sigen_api import get_client
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "sigen_smartport"
+
 CONF_STATION_ID = "station_id"
 CONF_LOAD_PATH = "load_path"
 CONF_BASE_URL = "base_url"
 CONF_AUTH_HEADER = "auth_header"
 CONF_USER_DEVICE_ID = "user_device_id"
+
+# How often HA polls the Sigen cloud for the real state. 3600 seconds = 1 hour
+SCAN_INTERVAL = timedelta(seconds=3600)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_USERNAME): cv.string,
@@ -26,6 +33,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_USER_DEVICE_ID, default="1770954624439"): cv.string,
 })
 
+
 def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Sigenergy power switch platform."""
     username = config.get(CONF_USERNAME)
@@ -37,93 +45,46 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     auth_header = config.get(CONF_AUTH_HEADER)
     user_device_id = config.get(CONF_USER_DEVICE_ID)
 
-    def token_fetcher():
-        token_url = f"{base_url}/auth/oauth/token"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0",
-            "accept": "*/*",
-            "auth-client-id": "sigen",
-            "authorization": auth_header,
-            "client-server": "aus",
-            "lang": "en_US",
-            "origin": "https://app-aus.sigencloud.com",
-            "referer": "https://app-aus.sigencloud.com/",
-            "sg-bui": "1",
-            "sg-env": "1",
-            "sg-pkg": "sigen_app",
-            "version": "RELEASE"
-        }
-        payload = {
-            "scope": "server",
-            "grant_type": "password",
-            "userDeviceId": user_device_id,
-            "username": username,
-            "password": password
-        }
-        try:
-            response = requests.post(token_url, data=payload, headers=headers, timeout=10)
-            if response.status_code == 200:
-                response_json = response.json()
-                if response_json.get("code") == 0:
-                    return response_json.get("data", {}).get("access_token")
-            _LOGGER.error(f"Sigen Switch Auth failed or rejected: {response.text}")
-            return None
-        except Exception as e:
-            _LOGGER.error(f"Exception during switch authorization loop: {e}")
-            return None
+    client = get_client(username, password, station_id, load_path, base_url,
+                         auth_header, user_device_id)
 
-    add_entities([SigenSmartPortControlSwitch(name, station_id, load_path, base_url, token_fetcher)], True)
+    add_entities([SigenSmartPortControlSwitch(name, station_id, load_path, client)], True)
 
 
 class SigenSmartPortControlSwitch(SwitchEntity):
-    """Controls manual output power state (On/Off)."""
+    """Controls and reflects the manual output power state (On/Off)."""
 
-    def __init__(self, name, station_id, load_path, base_url, token_fetcher):
+    def __init__(self, name, station_id, load_path, client):
         self._name = name
         self._station_id = station_id
         self._load_path = load_path
-        self._base_url = base_url
-        self._token_fetcher = token_fetcher
-        self._state = False
+        self._client = client
         self._unique_id = f"sigen_smartport_{station_id}_load_{load_path}_switch"
-        self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
 
     @property
-    def name(self): return self._name
+    def name(self):
+        return self._name
+
     @property
-    def is_on(self): return self._state
+    def unique_id(self):
+        return self._unique_id
+
     @property
-    def unique_id(self): return self._unique_id
+    def available(self):
+        return self._client.available
+
+    @property
+    def is_on(self):
+        return bool(self._client.manual_switch)
+
+    def update(self):
+        """Poll the Sigen cloud for the real contactor state."""
+        self._client.refresh()
 
     def turn_on(self, **kwargs):
-        token = self._token_fetcher()
-        if not token: return
-        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode/manual/switch"
-        params = {"stationId": self._station_id, "loadPath": self._load_path, "manualSwitch": 1}
-        try:
-            res = requests.patch(url, params=params, headers=self._get_headers(token), timeout=10)
-            if res.status_code == 200:
-                self._state = True
-                self.schedule_update_ha_state()
-        except Exception as e: _LOGGER.error(f"Error turning on switch: {e}")
+        if self._client.set_manual_switch(True):
+            self.schedule_update_ha_state()
 
     def turn_off(self, **kwargs):
-        token = self._token_fetcher()
-        if not token: return
-        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode/manual/switch"
-        params = {"stationId": self._station_id, "loadPath": self._load_path, "manualSwitch": 0}
-        try:
-            res = requests.patch(url, params=params, headers=self._get_headers(token), timeout=10)
-            if res.status_code == 200:
-                self._state = False
-                self.schedule_update_ha_state()
-        except Exception as e: _LOGGER.error(f"Error turning off switch: {e}")
-
-    def _get_headers(self, token):
-        return {
-            "User-Agent": self._user_agent, "accept": "*/*", "auth-client-id": "sigen",
-            "authorization": f"bearer {token}", "client-server": "aus", "lang": "en_US",
-            "origin": "https://app-aus.sigencloud.com", "referer": "https://app-aus.sigencloud.com/",
-            "sg-bui": "1", "sg-env": "1", "sg-pkg": "sigen_app", "sg-platform": "web",
-            "version": "RELEASE", "Content-Type": "application/json; charset=utf-8"
-        }
+        if self._client.set_manual_switch(False):
+            self.schedule_update_ha_state()
