@@ -4,7 +4,7 @@ A custom Home Assistant integration that provides full control over your **Sigen
 
 ## Why This Integration Exists
 
-The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
+The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` and `GET` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
 
 Forked repo from @CDSSBR - https://github.com/CDSSBR/Sig-Smart-Port-Control to add two way sync with Sig cloud.  Refactored code slightly to add a shared instance for GET and PATCH calls. Solution also caches Sig cloud tokens, looks at expiry times and refreshes tokens only when required or when an error is received.  This handles issues with multiple/frequent log in sessions to prevent Sig cloud services from logging off the account from all services (including app).
 
