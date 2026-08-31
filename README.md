@@ -43,7 +43,7 @@ Inside your main config directory, look for a folder named custom_components (if
 
 Create a new directory inside it named exactly sigen_smartport.
 
-Drop the __init__.py, manifest.json, switch.py, and select.py files from this repository directly into that folder.
+Drop the __init__.py, manifest.json, sigen_api.py, switch.py, and select.py files from this repository directly into that folder.
 
 ##Step 2: Retrieve Your Encrypted Password & Station ID
 Because this integration interacts directly with the private app cloud endpoints, you need to capture the exact login string your web profile sends out.
