@@ -6,6 +6,8 @@ A custom Home Assistant integration that provides full control over your **Sigen
 
 The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
 
+Forked repo from @CDSSBR - https://github.com/CDSSBR/Sig-Smart-Port-Control to add two way sync with Sig cloud.  Refactored code slightly to add a shared instance for GET and PATCH calls.
+
 ---
 
 ## Features
@@ -26,6 +28,7 @@ config/
     └── sigen_smartport/
         ├── __init__.py
         ├── manifest.json
+        ├── sigen_api.py
         ├── select.py
         └── switch.py
 		
@@ -45,11 +48,11 @@ Drop the __init__.py, manifest.json, switch.py, and select.py files from this re
 ##Step 2: Retrieve Your Encrypted Password & Station ID
 Because this integration interacts directly with the private app cloud endpoints, you need to capture the exact login string your web profile sends out.
 
-Using a desktop web browser (Chrome or Edge), go to your region's login page (e.g., https://app-aus.sigencloud.com or equivalent).
+Using a desktop web browser (Chrome or Edge), go to your region's login page (e.g., https://app-aus.sigencloud.com or equivalent). If you are logged in, please log out.  We are trying to catch the network request and esponse with all the details required.
 
 Right-click anywhere on the page and select Inspect to open Developer Tools, then click on the Network tab.
 
-In the Filter box, type /token to narrow the logs down.
+In the Filter box, type "token" to narrow the logs down.
 
 Log into your account using your regular mySigen app username and password.
 
@@ -61,10 +64,16 @@ username: Your account email.
 
 password: Copy the entire raw, encrypted Base64 string that follows password= (it will look like 2345fdfwregt323r==).
 
+user_device_id: Found in the "Request" data section under "userDeviceId". Typically 13 characters.
+
+auth_header: Found in the "Request" section of the token under.  It will be "Basic xxxxxxxxxx" (e.g. Basic c2lnZW46c2lnZW4=)
+
+In the Filter box, type "stationId" to narrow the logs down.
+
 station_id: Your 15-digit inverter station string (e.g., 1034555545453).
 
 Step 3: Configure configuration.yaml
-Open your main configuration.yaml file and add the configuration blocks for both the switch and select platforms. Supply your captured credentials:		
+Open your main configuration.yaml file and add the configuration blocks for both the switch and select platforms from the snipper "configuration.yaml" form this proejct. Supply your captured credentials.	
 
 Step 4: Validate and Restart Home Assistant
 Because this component introduces a brand new domain architecture (select.py), Home Assistant must perform a clean boot to register the backend components.
