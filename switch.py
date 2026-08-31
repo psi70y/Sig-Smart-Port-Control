@@ -19,8 +19,8 @@ CONF_BASE_URL = "base_url"
 CONF_AUTH_HEADER = "auth_header"
 CONF_USER_DEVICE_ID = "user_device_id"
 
-# How often HA polls the Sigen cloud for the real state. 3600 seconds = 1 hour
-SCAN_INTERVAL = timedelta(seconds=3600)
+# How often HA polls the Sigen cloud for the real state. 600 seconds = 10 minutes
+SCAN_INTERVAL = timedelta(seconds=600)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_USERNAME): cv.string,
