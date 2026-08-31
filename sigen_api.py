@@ -18,8 +18,14 @@ import requests
 
 _LOGGER = logging.getLogger(__name__)
 
-# Cache token for 25 minutes; refreshed sooner on demand if a call fails auth.
+# Fallback cache TTL if the login response ever omits expires_in.
+# Sigen's actual tokens run ~12h (expires_in: 43199 observed) - we normally
+# use that real value instead, minus _TOKEN_EXPIRY_BUFFER_SECONDS.
 _TOKEN_TTL_SECONDS = 25 * 60
+
+# Refresh a bit early rather than cutting it exactly at expiry, so a slow
+# request doesn't land right on the boundary and get rejected mid-flight.
+_TOKEN_EXPIRY_BUFFER_SECONDS = 5 * 60
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -69,7 +75,33 @@ class SigenSmartLoadClient:
         self.available = False
 
     # ---------------------------------------------------------------- auth
+    def _logout(self, token):
+        """Explicitly end a Sigen cloud session before discarding its token.
+
+        Sigen's cloud caps concurrent logged-in sessions per account and will
+        force-logout the account (booting the mySigen app/web UI too) if too
+        many tokens pile up. We don't log out after every call - that would
+        defeat token caching - only when a token is about to be replaced.
+        """
+        if not token:
+            return
+        logout_url = f"{self._base_url}/auth/token/logout"
+        headers = self._headers(token)
+        try:
+            res = requests.delete(logout_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                _LOGGER.debug("Logged off previous Sigen session cleanly.")
+            else:
+                _LOGGER.debug("Sigen logout returned HTTP %s: %s", res.status_code, res.text)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("Exception during Sigen logout (non-fatal): %s", e)
+
     def _fetch_token(self):
+        # Release the outgoing session before requesting a new one, so stale
+        # sessions don't accumulate on Sigen's side while we're still using
+        # a valid cached token in between logins.
+        self._logout(self._token)
+
         token_url = f"{self._base_url}/auth/oauth/token"
         headers = {
             "User-Agent": _USER_AGENT,
@@ -97,10 +129,20 @@ class SigenSmartLoadClient:
             if response.status_code == 200:
                 body = response.json()
                 if body.get("code") == 0:
-                    token = body.get("data", {}).get("access_token")
+                    data = body.get("data", {})
+                    token = data.get("access_token")
                     if token:
                         self._token = token
-                        self._token_expiry = time.monotonic() + _TOKEN_TTL_SECONDS
+                        # Trust Sigen's own expiry when it's provided, minus a
+                        # safety buffer, instead of a hardcoded guess. Falls
+                        # back to the conservative default if the field is
+                        # ever missing or looks malformed.
+                        expires_in = data.get("expires_in")
+                        if isinstance(expires_in, (int, float)) and expires_in > _TOKEN_EXPIRY_BUFFER_SECONDS:
+                            ttl = expires_in - _TOKEN_EXPIRY_BUFFER_SECONDS
+                        else:
+                            ttl = _TOKEN_TTL_SECONDS
+                        self._token_expiry = time.monotonic() + ttl
                         return token
             _LOGGER.error("Sigen auth failed or rejected: %s", response.text)
         except Exception as e:  # noqa: BLE001
