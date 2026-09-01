@@ -1,85 +1,99 @@
 # Sigenergy Smart Port Integration for Home Assistant
 
-A custom Home Assistant integration that provides full control over your **Sigenergy Smart Port**, allowing you to toggle manual load switching and seamlessly transition between Manual control and native Auto (Sig Schedule) modes.
+A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written.
+
+> **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, and a proper HACS + UI setup flow on top of that foundation.
 
 ## Why This Integration Exists
 
-The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` and `GET` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
+The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This integration works by mimicking the exact request sequences used by the official **mySigen Web App** (`api-aus.sigencloud.com`) — the same endpoints the app itself calls, not a published developer API.
 
-Forked repo from @CDSSBR - https://github.com/CDSSBR/Sig-Smart-Port-Control to add two way sync with Sig cloud.  Refactored code slightly to add a shared instance for GET and PATCH calls. Solution also caches Sig cloud tokens, looks at expiry times and refreshes tokens only when required or when an error is received.  This handles issues with multiple/frequent log in sessions to prevent Sig cloud services from logging off the account from all services (including app).
+⚠️ **A note on Sigenergy's Terms & Conditions:** this relies on Sigenergy's private app API rather than an official developer API. Their T&Cs grant a fairly narrow personal-use license and reserve the right to suspend cloud account access at their discretion. This hasn't caused issues in testing, but there's a real, likely low, risk if it gets flagged on their end. Use at your own risk.
+
+---
+
+## What's New in This Fork
+
+- **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
+- **Safer session handling** — logins are cached for their real ~12-hour lifetime (read from Sigen's own token response) instead of logging in fresh on every single command, and old sessions are cleanly logged out when a token rotates. This avoids tripping Sigen's cloud session limits, which can otherwise force-log you out of the mySigen app.
+- **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
+- **HACS-installable** — add as a HACS custom repository instead of manually copying files.
+- **Devices, not loose entities** — the switch and mode selector for each Smart Port load are now grouped together as one Device in the HA UI.
 
 ---
 
 ## Features
 
-- **Power Relay Switch (`switch.sigen_smart_port_control`)**: Instantly turn your smart port loads (e.g., EV Chargers, Hot Water systems) On or Off manually.
-- **Mode Dropdown Selector (`select.sigen_smart_port_mode`)**: A clean UI dropdown to instantly cycle between **Manual** and **Auto (Sig Schedule)** modes.
-- **Automated Token Management**: Automatically handles login session handshake wrappers behind the scenes every time an action is taken.
+- **Power switch**: turn a Smart Port load (e.g. hot water system, pool pump, EV charger) on or off manually, with state that reflects reality.
+- **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
+- **Automatic token/session management**: handled entirely behind the scenes.
 
 ---
 
-## File Structure
+## Installation
 
-To install this component, place the integration files into your Home Assistant directory matching this exact path structure:
+### Option A — HACS (recommended)
 
-```text
-config/
-└── custom_components/
-    └── sigen_smartport/
-        ├── __init__.py
-        ├── manifest.json
-        ├── sigen_api.py
-        ├── select.py
-        └── switch.py
-		
-		
-##🚀 Installation & Setup
-Follow these exact steps to add the integration files, acquire your credentials from the web app, and activate the entities.
+1. In HA: **HACS → ⋮ (top right) → Custom repositories**
+2. Add this repository's URL, category **Integration**
+3. Find "Sigenergy Smart Port" in HACS and install it
+4. Restart Home Assistant
 
-##Step 1: Install the Component Files
-Access your Home Assistant file system (using Samba, SSH, VS Code Server, or the File Editor add-on).
+### Option B — Manual
 
-Inside your main config directory, look for a folder named custom_components (if it does not exist, create it).
+Copy the `custom_components/sigen_smartport/` folder from this repo into your HA `config/custom_components/` directory, then restart Home Assistant.
 
-Create a new directory inside it named exactly sigen_smartport.
+---
 
-Drop the __init__.py, manifest.json, sigen_api.py, switch.py, and select.py files from this repository directly into that folder.
+## Setup
 
-##Step 2: Retrieve Your Encrypted Password & Station ID
-Because this integration interacts directly with the private app cloud endpoints, you need to capture the exact login string your web profile sends out.
+Once installed, **all setup happens in the UI** — there's no `configuration.yaml` editing.
 
-Using a desktop web browser (Chrome or Edge), go to your region's login page (e.g., https://app-aus.sigencloud.com or equivalent). If you are logged in, please log out.  We are trying to catch the network request and esponse with all the details required.
+1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Smart Port"**
+2. You'll be asked for:
+   - **Username** — your mySigen account email
+   - **Password** — see note below, this is *not* simply your plaintext account password
+   - **Station ID** — your 15-digit inverter station ID
+   - **Load Path** — leave as `1` unless you have multiple Smart Port loads (see [Multiple Devices](#multiple-devices) below)
+   - **Name** — a friendly name for this device
+3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID) — only change these if you know you need to.
+4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
 
-Right-click anywhere on the page and select Inspect to open Developer Tools, then click on the Network tab.
+### Capturing your credentials
 
-In the Filter box, type "token" to narrow the logs down.
+Because this talks to private app endpoints, you need to capture a few values from a browser's network inspector rather than just typing your normal login:
 
-Log into your account using your regular mySigen app username and password.
+1. On a desktop browser, open **DevTools → Network tab**, filter for `/token`
+2. Log into `app-aus.sigencloud.com` (or your region's equivalent) normally
+3. Click the `token` request, open its **Payload/Body** tab, and note:
+   - `username` — your account email
+   - `password` — the **raw string** sent in the payload (this is what the app itself sends, not necessarily your literal typed password — copy it exactly as shown)
+   - `userDeviceId`
+4. From the request **Headers**, note the `Authorization` header value (looks like `Basic c2lnZW46c2lnZW4=`)
+5. Find your `station_id` by filtering for `stationId` in the network log — it'll appear as a query parameter on several requests
 
-In the network panel list, click on the token network request row that shows up and navigate to its Payload or Body tab.
+---
 
-Copy down your hardware parameters:
+## Multiple Devices
 
-username: Your account email.
+If your Sigen setup has more than one Smart Port load (e.g. a hot water heater *and* a pool pump), **add the integration again** via Settings → Devices & Services → Add Integration, using the same credentials but a different **Load Path** for each device. Each one becomes its own Device with its own switch + mode selector.
 
-password: Copy the entire raw, encrypted Base64 string that follows password= (it will look like 2345fdfwregt323r==).
+Finding the correct `load_path` for a second device requires digging through the network tab the same way as above — there's no automatic device-listing/discovery.
 
-user_device_id: Found in the "Request" data section under "userDeviceId". Typically 13 characters.
+---
 
-auth_header: Found in the "Request" section of the token under.  It will be "Basic xxxxxxxxxx" (e.g. Basic c2lnZW46c2lnZW4=)
+## Migrating from the YAML-based version
 
-In the Filter box, type "stationId" to narrow the logs down.
+If you were using an earlier version of this integration configured via `configuration.yaml`:
 
-station_id: Your 15-digit inverter station string (e.g., 1034555545453).
+1. Remove the `switch:` and `select:` platform entries for `sigen_smartport` from your YAML
+2. Restart Home Assistant
+3. Add the integration fresh via **Settings → Devices & Services → Add Integration**, entering your credentials as above
 
-Step 3: Configure configuration.yaml
-Open your main configuration.yaml file and add the configuration blocks for both the switch and select platforms from the snipper "configuration.yaml" form this proejct. Supply your captured credentials.	
+Existing automations/dashboards referencing the old entity IDs will need to be pointed at the new entities after setup.
 
-Step 4: Validate and Restart Home Assistant
-Because this component introduces a brand new domain architecture (select.py), Home Assistant must perform a clean boot to register the backend components.
+---
 
-In your Home Assistant UI, navigate to Settings > Developer Tools > YAML.
+## Disclaimer
 
-Click Check Configuration to ensure your spacing and strings are syntactically sound.
-
-Click Restart to perform a system restart.
+This is an unofficial, community-maintained integration and is not affiliated with or endorsed by Sigenergy. It relies on reverse-engineered private API endpoints that could change or break without notice. Use at your own risk.
