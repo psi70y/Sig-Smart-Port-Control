@@ -1,0 +1,12 @@
+{
+  "domain": "sigen_smartport",
+  "name": "Sigenergy Smart Port",
+  "documentation": "https://github.com/psi70y/Sig-Smart-Port-Control",
+  "issue_tracker": "https://github.com/psi70y/Sig-Smart-Port-Control/issues",
+  "dependencies": [],
+  "codeowners": ["@psi70y"],
+  "config_flow": true,
+  "version": "2.1.0",
+  "iot_class": "cloud_polling",
+  "requirements": ["requests"]
+}

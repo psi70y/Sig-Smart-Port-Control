@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Sigen Cloud",
+        "description": "Enter the same username/password you use in the mySigen app, plus your station ID. Find your station ID in the mySigen app URL or by asking your installer.",
+        "data": {
+          "username": "Username (email)",
+          "password": "Password",
+          "station_id": "Station ID",
+          "load_path": "Load Path (leave as 1 unless you have multiple Smart Port loads)",
+          "name": "Name for this device",
+          "scan_interval": "Poll interval (seconds)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced settings",
+        "description": "These defaults work for most Australian accounts. Only change them if you know you need to.",
+        "data": {
+          "base_url": "API base URL",
+          "auth_header": "Auth header",
+          "user_device_id": "Device ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, and station ID."
+    },
+    "abort": {
+      "already_configured": "This Smart Port load is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sigen Smart Port options",
+        "description": "How often Home Assistant polls the Sigen cloud for this device's real state. Lower values catch changes faster but log in more often - the default of 300s (5 minutes) is a sensible balance.",
+        "data": {
+          "scan_interval": "Poll interval (seconds)"
+        }
+      }
+    }
+  }
+}
+
