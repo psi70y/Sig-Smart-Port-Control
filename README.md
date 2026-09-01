@@ -4,7 +4,7 @@ A custom Home Assistant integration that provides full control over your **Sigen
 
 ## Why This Integration Exists
 
-The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
+The official Sigenergy OpenAPI restricts or completely locks out remote control commands for Smart Port relays for regular consumer tiers. This custom integration bypasses those cloud restrictions by reverse-engineering and securely mimicking the exact `PATCH` and `GET` request sequences used by the official **mySigen Web App** ecosystem (hosted on `api-aus.sigencloud.com`).
 
 Forked repo from @CDSSBR - https://github.com/CDSSBR/Sig-Smart-Port-Control to add two way sync with Sig cloud.  Refactored code slightly to add a shared instance for GET and PATCH calls. Solution also caches Sig cloud tokens, looks at expiry times and refreshes tokens only when required or when an error is received.  This handles issues with multiple/frequent log in sessions to prevent Sig cloud services from logging off the account from all services (including app).
 
@@ -43,7 +43,7 @@ Inside your main config directory, look for a folder named custom_components (if
 
 Create a new directory inside it named exactly sigen_smartport.
 
-Drop the __init__.py, manifest.json, switch.py, and select.py files from this repository directly into that folder.
+Drop the __init__.py, manifest.json, sigen_api.py, switch.py, and select.py files from this repository directly into that folder.
 
 ##Step 2: Retrieve Your Encrypted Password & Station ID
 Because this integration interacts directly with the private app cloud endpoints, you need to capture the exact login string your web profile sends out.
