@@ -1,11 +1,12 @@
 """The Sigenergy Smart Port integration."""
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -22,6 +23,9 @@ from .const import (
 from .sigen_api import SigenSmartLoadClient
 
 _LOGGER = logging.getLogger(__name__)
+
+# Bumped only if the persisted token file's shape ever changes.
+TOKEN_STORAGE_VERSION = 1
 
 
 class SigenCoordinator(DataUpdateCoordinator):
@@ -45,6 +49,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Sigen Smart Port from a config entry."""
     data = entry.data
 
+    # Persist the auth token to disk, keyed to this specific config entry, so
+    # a Home Assistant/Supervisor restart reuses the still-valid token
+    # instead of forcing a brand new login every time. Frequent HA restarts
+    # (updates, watchdog, addon restarts) were causing far more logins than
+    # the ~12h token lifetime alone would suggest, which appears to be what
+    # was tripping Sigen's cloud into force-logging-out the mySigen app/web
+    # portal.
+    store: Store = Store(hass, TOKEN_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_token")
+    stored_token = await store.async_load()
+
+    def _persist_token(token: str, expiry_epoch: float, refresh_token: str) -> None:
+        # Called from the executor thread that performs the actual HTTP
+        # login/refresh (see sigen_api.py) - hass.add_job is safe to call
+        # from any thread and schedules the async save onto the event loop.
+        hass.add_job(_save_token_to_disk(store, token, expiry_epoch, refresh_token))
+
+    async def _save_token_to_disk(store: Store, token: str, expiry_epoch: float, refresh_token: str) -> None:
+        await store.async_save({"token": token, "expiry": expiry_epoch, "refresh_token": refresh_token})
+        expiry_str = datetime.fromtimestamp(expiry_epoch).strftime("%Y-%m-%d %H:%M:%S")
+        _LOGGER.info(
+            "Sigen Smart Port: saved refreshed auth token to disk (valid until %s)", expiry_str
+        )
+
     client = SigenSmartLoadClient(
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
@@ -53,7 +80,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data[CONF_BASE_URL],
         data[CONF_AUTH_HEADER],
         data[CONF_USER_DEVICE_ID],
+        on_token_change=_persist_token,
     )
+
+    if stored_token:
+        client.restore_cached_token(
+            stored_token.get("token"),
+            stored_token.get("expiry"),
+            stored_token.get("refresh_token"),
+        )
 
     coordinator = SigenCoordinator(
         hass,
@@ -93,3 +128,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up the persisted token file when the integration is fully removed
+    (not just unloaded/reloaded)."""
+    store: Store = Store(hass, TOKEN_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_token")
+    await store.async_remove()

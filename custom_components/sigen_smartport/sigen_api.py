@@ -13,6 +13,7 @@ action.
 
 import logging
 import time
+from datetime import datetime
 
 import requests
 
@@ -26,6 +27,15 @@ _TOKEN_TTL_SECONDS = 25 * 60
 # Refresh a bit early rather than cutting it exactly at expiry, so a slow
 # request doesn't land right on the boundary and get rejected mid-flight.
 _TOKEN_EXPIRY_BUFFER_SECONDS = 5 * 60
+
+# NOTE: an earlier version of this client explicitly called
+# DELETE /auth/token/logout on the outgoing token before fetching a new one,
+# intended to keep concurrent Sigen cloud sessions from piling up. In
+# practice this caused the mySigen app/web portal to get logged out roughly
+# once a day, strongly suggesting Sigen's logout endpoint isn't scoped to
+# just the token you pass it. It was removed: at ~12h token caching, we
+# only log in once or twice a day anyway, so old tokens are left to expire
+# naturally server-side instead of being explicitly revoked.
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -55,7 +65,7 @@ class SigenSmartLoadClient:
     """Wraps auth + read/write calls for a single Smart Port load."""
 
     def __init__(self, username, password, station_id, load_path, base_url,
-                 auth_header, user_device_id):
+                 auth_header, user_device_id, on_token_change=None):
         self._username = username
         self._password = password
         self._station_id = station_id
@@ -64,8 +74,17 @@ class SigenSmartLoadClient:
         self._auth_header = auth_header
         self._user_device_id = user_device_id
 
+        # Called (access_token: str, expiry_epoch: float, refresh_token: str)
+        # whenever a new token pair is issued, so the caller can persist it
+        # to disk and survive restarts without forcing an extra login.
+        # Optional - a storage failure here must never break authentication.
+        self._on_token_change = on_token_change
+
         self._token = None
-        self._token_expiry = 0.0
+        self._token_expiry = 0.0  # wall-clock epoch seconds, NOT monotonic -
+                                   # this needs to remain meaningful after a
+                                   # process restart, when restored from disk.
+        self._refresh_token = None
 
         # Last known state read from the cloud. None until first successful
         # poll. Consumers (switch/select entities) read this after calling
@@ -74,36 +93,25 @@ class SigenSmartLoadClient:
         self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
         self.available = False
 
-    # ---------------------------------------------------------------- auth
-    def _logout(self, token):
-        """Explicitly end a Sigen cloud session before discarding its token.
+    def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
+        """Reload a previously-persisted token (e.g. after a restart) so we
+        don't force a fresh login unless it's actually expired."""
+        if token and expiry_epoch and expiry_epoch > time.time():
+            self._token = token
+            self._token_expiry = expiry_epoch
+            expiry_str = datetime.fromtimestamp(expiry_epoch).strftime("%Y-%m-%d %H:%M:%S")
+            _LOGGER.info(
+                "Sigen Smart Port: reused cached auth token from disk (valid until %s) - no fresh login needed",
+                expiry_str,
+            )
+        # The refresh_token is restored independently of whether the access
+        # token itself is still valid - it's what lets us renew gently
+        # instead of falling back to a full password login after a restart.
+        if refresh_token:
+            self._refresh_token = refresh_token
 
-        Sigen's cloud caps concurrent logged-in sessions per account and will
-        force-logout the account (booting the mySigen app/web UI too) if too
-        many tokens pile up. We don't log out after every call - that would
-        defeat token caching - only when a token is about to be replaced.
-        """
-        if not token:
-            return
-        logout_url = f"{self._base_url}/auth/token/logout"
-        headers = self._headers(token)
-        try:
-            res = requests.delete(logout_url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                _LOGGER.debug("Logged off previous Sigen session cleanly.")
-            else:
-                _LOGGER.debug("Sigen logout returned HTTP %s: %s", res.status_code, res.text)
-        except Exception as e:  # noqa: BLE001
-            _LOGGER.debug("Exception during Sigen logout (non-fatal): %s", e)
-
-    def _fetch_token(self):
-        # Release the outgoing session before requesting a new one, so stale
-        # sessions don't accumulate on Sigen's side while we're still using
-        # a valid cached token in between logins.
-        self._logout(self._token)
-
-        token_url = f"{self._base_url}/auth/oauth/token"
-        headers = {
+    def _auth_headers(self):
+        return {
             "User-Agent": _USER_AGENT,
             "accept": "*/*",
             "auth-client-id": "sigen",
@@ -117,6 +125,81 @@ class SigenSmartLoadClient:
             "sg-pkg": "sigen_app",
             "version": "RELEASE",
         }
+
+    def _store_new_tokens(self, data):
+        """Common handling for a successful /auth/oauth/token response,
+        whichever grant type produced it."""
+        token = data.get("access_token")
+        if not token:
+            return None
+
+        self._token = token
+        self._refresh_token = data.get("refresh_token", self._refresh_token)
+
+        # Trust Sigen's own expiry when it's provided, minus a safety
+        # buffer, instead of a hardcoded guess. Falls back to the
+        # conservative default if the field is ever missing or malformed.
+        expires_in = data.get("expires_in")
+        if isinstance(expires_in, (int, float)) and expires_in > _TOKEN_EXPIRY_BUFFER_SECONDS:
+            ttl = expires_in - _TOKEN_EXPIRY_BUFFER_SECONDS
+        else:
+            ttl = _TOKEN_TTL_SECONDS
+        self._token_expiry = time.time() + ttl
+
+        if self._on_token_change:
+            try:
+                self._on_token_change(self._token, self._token_expiry, self._refresh_token)
+            except Exception as e:  # noqa: BLE001
+                # Persisting the token is a nice-to-have; never let a
+                # storage problem break a login that already succeeded.
+                _LOGGER.debug("Could not persist Sigen token (non-fatal): %s", e)
+
+        return token
+
+    # ---------------------------------------------------------------- auth
+    def _refresh_with_token(self):
+        """Renew using the refresh_token grant - this is what Sigen's own
+        mySigen app does near expiry, rather than a full password re-login.
+        Returns the new access token, or None if the refresh_token itself
+        was rejected (expired/invalid), in which case the caller should
+        fall back to a full password login."""
+        if not self._refresh_token:
+            return None
+
+        token_url = f"{self._base_url}/auth/oauth/token"
+        payload = {
+            "scope": "server",
+            "grant_type": "refresh_token",
+            "refresh_token": self._refresh_token,
+        }
+        try:
+            response = requests.post(token_url, data=payload, headers=self._auth_headers(), timeout=10)
+            if response.status_code == 200:
+                body = response.json()
+                if body.get("code") == 0:
+                    token = self._store_new_tokens(body.get("data", {}))
+                    if token:
+                        expiry_str = datetime.fromtimestamp(self._token_expiry).strftime("%Y-%m-%d %H:%M:%S")
+                        _LOGGER.info(
+                            "Sigen Smart Port: renewed session via refresh token (valid until %s)",
+                            expiry_str,
+                        )
+                        return token
+            _LOGGER.debug("Sigen refresh_token grant rejected, will fall back to full login: %s", response.text)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("Exception during Sigen token refresh (will fall back to full login): %s", e)
+        # A rejected/failed refresh means the refresh_token is no longer
+        # usable - clear it so we don't keep retrying a dead token.
+        self._refresh_token = None
+        return None
+
+    def _password_login(self):
+        """Full password-grant login. Used only on first-ever setup or when
+        a refresh_token isn't available/valid - Sigen's own app appears to
+        treat this as a new sign-in, which is the behaviour suspected of
+        forcing other active sessions (the mySigen app/web portal) to log
+        out, so this is deliberately the fallback path, not the primary one."""
+        token_url = f"{self._base_url}/auth/oauth/token"
         payload = {
             "scope": "server",
             "grant_type": "password",
@@ -125,24 +208,17 @@ class SigenSmartLoadClient:
             "password": self._password,
         }
         try:
-            response = requests.post(token_url, data=payload, headers=headers, timeout=10)
+            response = requests.post(token_url, data=payload, headers=self._auth_headers(), timeout=10)
             if response.status_code == 200:
                 body = response.json()
                 if body.get("code") == 0:
-                    data = body.get("data", {})
-                    token = data.get("access_token")
+                    token = self._store_new_tokens(body.get("data", {}))
                     if token:
-                        self._token = token
-                        # Trust Sigen's own expiry when it's provided, minus a
-                        # safety buffer, instead of a hardcoded guess. Falls
-                        # back to the conservative default if the field is
-                        # ever missing or looks malformed.
-                        expires_in = data.get("expires_in")
-                        if isinstance(expires_in, (int, float)) and expires_in > _TOKEN_EXPIRY_BUFFER_SECONDS:
-                            ttl = expires_in - _TOKEN_EXPIRY_BUFFER_SECONDS
-                        else:
-                            ttl = _TOKEN_TTL_SECONDS
-                        self._token_expiry = time.monotonic() + ttl
+                        expiry_str = datetime.fromtimestamp(self._token_expiry).strftime("%Y-%m-%d %H:%M:%S")
+                        _LOGGER.info(
+                            "Sigen Smart Port: logged in with a fresh password-grant token (valid until %s)",
+                            expiry_str,
+                        )
                         return token
             _LOGGER.error("Sigen auth failed or rejected: %s", response.text)
         except Exception as e:  # noqa: BLE001
@@ -151,8 +227,17 @@ class SigenSmartLoadClient:
         self._token_expiry = 0.0
         return None
 
+    def _fetch_token(self):
+        """Get a new access token, preferring the gentle refresh_token grant
+        (what Sigen's own app uses) and only falling back to a full
+        password login if that's not possible."""
+        token = self._refresh_with_token()
+        if token:
+            return token
+        return self._password_login()
+
     def _get_token(self, force=False):
-        if force or self._token is None or time.monotonic() >= self._token_expiry:
+        if force or self._token is None or time.time() >= self._token_expiry:
             return self._fetch_token()
         return self._token
 
