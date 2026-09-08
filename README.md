@@ -14,8 +14,9 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 
 ## What's New in This Fork
 
-- **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
-- **Safer session handling** — logins are cached for their real ~12-hour lifetime (read from Sigen's own token response) instead of logging in fresh on every single command, and old sessions are cleanly logged out when a token rotates. This avoids tripping Sigen's cloud session limits, which can otherwise force-log you out of the mySigen app.
+- **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds (configurable) and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
+- **Session handling that doesn't log you out of the mySigen app** — token and refresh token persist to disk across restarts, and renewal uses Sigen's own `refresh_token` grant instead of a full password re-login. There's no explicit logout call; tokens simply expire naturally.
+- **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
 - **HACS-installable** — add as a HACS custom repository instead of manually copying files.
 - **Devices, not loose entities** — the switch and mode selector for each Smart Port load are now grouped together as one Device in the HA UI.
@@ -26,7 +27,8 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 
 - **Power switch**: turn a Smart Port load (e.g. hot water system, pool pump, EV charger) on or off manually, with state that reflects reality.
 - **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
-- **Automatic token/session management**: handled entirely behind the scenes.
+- **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
+- **Automatic, restart-safe token management**: tokens (and refresh tokens) persist to disk and renew gently via a refresh grant, entirely behind the scenes — no re-authentication prompts, and no more forced logouts of the mySigen app/web portal.
 
 ---
 
@@ -56,14 +58,17 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
    - **Station ID** — your 15-digit inverter station ID
    - **Load Path** — leave as `1` unless you have multiple Smart Port loads (see [Multiple Devices](#multiple-devices) below)
    - **Name** — a friendly name for this device
+   - **Poll interval** — how often (in seconds) HA checks the cloud for real state; defaults to `300` (5 minutes)
 3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID) — only change these if you know you need to.
 4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
+
+The poll interval can be changed later at any time via **Settings → Devices & Services → Sigenergy Smart Port → Configure**, without needing to remove and re-add the device.
 
 ### Capturing your credentials
 
 Because this talks to private app endpoints, you need to capture a few values from a browser's network inspector rather than just typing your normal login:
 
-1. On a desktop browser, open **DevTools → Network tab**, filter for `/token`
+1. On a desktop browser, open **DevTools → Network tab**, filter for `token`
 2. Log into `app-aus.sigencloud.com` (or your region's equivalent) normally
 3. Click the `token` request, open its **Payload/Body** tab, and note:
    - `username` — your account email
@@ -71,6 +76,17 @@ Because this talks to private app endpoints, you need to capture a few values fr
    - `userDeviceId`
 4. From the request **Headers**, note the `Authorization` header value (looks like `Basic c2lnZW46c2lnZW4=`)
 5. Find your `station_id` by filtering for `stationId` in the network log — it'll appear as a query parameter on several requests
+
+---
+
+## Session Handling, In Detail
+
+- **Token + refresh token are persisted to disk**, tied to each device's config entry. A Home Assistant or Supervisor restart reuses the still-valid session instead of forcing a fresh login every time.
+- **Renewal uses the `refresh_token` grant**, the same mechanism Sigen's own mySigen web app uses to extend a session near its ~12-hour expiry, rather than a full username/password login.
+- **A full password login only happens** on first-ever setup, or as a fallback if a refresh token is ever rejected outright (e.g. after an extended period offline).
+- **There's no explicit logout call.** Tokens are simply left to expire naturally rather than being proactively revoked.
+
+If the mySigen app or web portal gets logged out unexpectedly, please open an issue with your Home Assistant logs (filter for "Sigen Smart Port") covering that period — the integration logs every login and refresh event at `info` level to help diagnose it.
 
 ---
 
