@@ -28,6 +28,25 @@ _LOGGER = logging.getLogger(__name__)
 TOKEN_STORAGE_VERSION = 1
 
 
+def _ensure_default_log_level() -> None:
+    """Default this integration's loggers to INFO so login/refresh/token
+    events are visible out of the box, without requiring the user to add
+    a `logger:` override in configuration.yaml.
+
+    Only applies if the user hasn't already explicitly set a level for
+    these loggers - NOTSET means "never touched, just inheriting a
+    parent/root default" - so a deliberate user override (e.g. silencing
+    this integration, or setting it to debug) is always respected and
+    never touched here. HA's own guidance discourages integrations from
+    unconditionally overriding user-controlled logging preferences, hence
+    the NOTSET check rather than always forcing the level.
+    """
+    for logger_name in (__name__, f"{__name__}.sigen_api"):
+        logger = logging.getLogger(logger_name)
+        if logger.level == logging.NOTSET:
+            logger.setLevel(logging.INFO)
+
+
 class SigenCoordinator(DataUpdateCoordinator):
     """Polls one Smart Port load and hands the result to its entities."""
 
@@ -47,6 +66,8 @@ class SigenCoordinator(DataUpdateCoordinator):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Sigen Smart Port from a config entry."""
+    _ensure_default_log_level()
+
     data = entry.data
 
     # Persist the auth token to disk, keyed to this specific config entry, so
