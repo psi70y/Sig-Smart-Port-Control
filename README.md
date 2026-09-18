@@ -1,8 +1,8 @@
 # Sigenergy Smart Port Integration for Home Assistant
 
-A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written.
+A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles).
 
-> **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, and a proper HACS + UI setup flow on top of that foundation.
+> **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, energy profile control, and a proper HACS + UI setup flow on top of that foundation.
 
 ## Why This Integration Exists
 
@@ -15,11 +15,12 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 ## What's New in This Fork
 
 - **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds (configurable) and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
+- **Energy Profile control** — read and switch your system's overall operation mode/profile (Maximum Self-Powered, TOU, Fully Fed to Grid, or one of your own saved custom profiles), not just the Smart Port load.
 - **Session handling that doesn't log you out of the mySigen app** — token and refresh token persist to disk across restarts, and renewal uses Sigen's own `refresh_token` grant instead of a full password re-login. There's no explicit logout call; tokens simply expire naturally.
 - **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
 - **HACS-installable** — add as a HACS custom repository instead of manually copying files.
-- **Devices, not loose entities** — the switch and mode selector for each Smart Port load are now grouped together as one Device in the HA UI.
+- **Devices, not loose entities** — the switch and mode selector for each Smart Port load are grouped together as one Device in the HA UI; the Energy Profile selector gets its own Station-level device.
 
 ---
 
@@ -27,8 +28,9 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 
 - **Power switch**: turn a Smart Port load (e.g. hot water system, pool pump, EV charger) on or off manually, with state that reflects reality.
 - **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
+- **Energy Profile selector**: switch between built-in system modes and your own saved custom profiles, synced with the cloud.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
-- **Automatic, restart-safe token management**: tokens (and refresh tokens) persist to disk and renew gently via a refresh grant, entirely behind the scenes — no re-authentication prompts, and no more forced logouts of the mySigen app/web portal.
+- **Automatic, restart-safe token management**: tokens (and refresh tokens) persist to disk and renew gently via a refresh grant, entirely behind the scenes — no re-authentication prompts, and no forced logouts of the mySigen app/web portal.
 
 ---
 
@@ -68,7 +70,7 @@ The poll interval can be changed later at any time via **Settings → Devices & 
 
 Because this talks to private app endpoints, you need to capture a few values from a browser's network inspector rather than just typing your normal login:
 
-1. On a desktop browser, open **DevTools → Network tab**, filter for `token`
+1. On a desktop browser, open **DevTools → Network tab**, filter for `/token`
 2. Log into `app-aus.sigencloud.com` (or your region's equivalent) normally
 3. Click the `token` request, open its **Payload/Body** tab, and note:
    - `username` — your account email
@@ -87,6 +89,17 @@ Because this talks to private app endpoints, you need to capture a few values fr
 - **There's no explicit logout call.** Tokens are simply left to expire naturally rather than being proactively revoked.
 
 If the mySigen app or web portal gets logged out unexpectedly, please open an issue with your Home Assistant logs (filter for "Sigen Smart Port") covering that period — the integration logs every login and refresh event at `info` level to help diagnose it.
+
+---
+
+## Energy Profile
+
+In addition to the per-load Smart Port switch, this integration reads and controls your system's overall **Energy Profile** — the same setting shown when you tap the current mode/profile name in the mySigen app.
+
+- Appears as a **separate select entity** on its own device (**"Sigen Station {your station ID}"**), since this is a station-wide setting rather than something tied to a specific Smart Port load.
+- The list of options is pulled directly from your account — Sigenergy's built-in system modes (e.g. Maximum Self-Powered, TOU, Fully Fed to Grid) plus **any custom profiles you've saved yourself**, exactly as labeled in the mySigen app. Nothing is hardcoded, so this stays in sync automatically if you rename or add profiles.
+- The current selection is polled on the same schedule as the Smart Port status (governed by the same poll interval setting).
+- If you have more than one Smart Port load configured on the same station, each config entry creates its own Energy Profile entity, but Home Assistant's device registry merges them under the same Station device rather than creating duplicates.
 
 ---
 
