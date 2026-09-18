@@ -48,7 +48,8 @@ def _ensure_default_log_level() -> None:
 
 
 class SigenCoordinator(DataUpdateCoordinator):
-    """Polls one Smart Port load and hands the result to its entities."""
+    """Polls one Smart Port load (plus its station's energy profile) and
+    hands the result to its entities."""
 
     def __init__(self, hass: HomeAssistant, client: SigenSmartLoadClient, name: str, update_interval: timedelta):
         super().__init__(hass, _LOGGER, name=f"sigen_smartport_{name}", update_interval=update_interval)
@@ -58,9 +59,18 @@ class SigenCoordinator(DataUpdateCoordinator):
         ok = await self.hass.async_add_executor_job(self.client.refresh)
         if not ok:
             raise UpdateFailed("Could not read status from Sigen cloud")
+
+        # Energy profile is a lightweight extra read alongside the main
+        # Smart Port poll. Deliberately not fatal to the whole coordinator
+        # if it has trouble - the Smart Port switch/select should keep
+        # working even if this optional station-level read fails.
+        await self.hass.async_add_executor_job(self.client.fetch_current_profile)
+
         return {
             "control_mode": self.client.control_mode,
             "manual_switch": self.client.manual_switch,
+            "energy_mode": self.client.current_energy_mode,
+            "energy_profile_id": self.client.current_profile_id,
         }
 
 
@@ -110,6 +120,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_token.get("expiry"),
             stored_token.get("refresh_token"),
         )
+
+    # Energy profile options (the user's saved profiles + built-in modes)
+    # rarely change, so fetch this once at setup rather than every poll.
+    await hass.async_add_executor_job(client.fetch_profile_options)
 
     coordinator = SigenCoordinator(
         hass,

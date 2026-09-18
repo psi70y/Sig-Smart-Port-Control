@@ -93,6 +93,15 @@ class SigenSmartLoadClient:
         self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
         self.available = False
 
+        # Energy/operation profile state (system-wide, not per Smart Port
+        # load - keyed by station_id only). profile_options is fetched once
+        # (it rarely changes) rather than on every poll; current_energy_mode
+        # / current_profile_id are refreshed each poll cycle alongside the
+        # Smart Port status.
+        self.profile_options = []     # list of (label, mode, profile_id)
+        self.current_energy_mode = None
+        self.current_profile_id = None
+
     def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
         """Reload a previously-persisted token (e.g. after a restart) so we
         don't force a fresh login unless it's actually expired."""
@@ -259,15 +268,21 @@ class SigenSmartLoadClient:
             "Content-Type": "application/json; charset=utf-8",
         }
 
-    def _request(self, method, url, params):
-        """Issue a request, retrying once with a fresh token on auth failure."""
+    def _request(self, method, url, params=None, json_body=None):
+        """Issue a request, retrying once with a fresh token on auth failure.
+
+        Smart Port calls send everything as query params (even for
+        PATCH/PUT); the energy-profile write call instead needs a JSON
+        request body - json_body is optional and only used where needed.
+        """
         for attempt in (False, True):
             token = self._get_token(force=attempt)
             if not token:
                 return None
             try:
                 res = requests.request(
-                    method, url, params=params, headers=self._headers(token), timeout=10
+                    method, url, params=params, json=json_body,
+                    headers=self._headers(token), timeout=10
                 )
             except Exception as e:  # noqa: BLE001
                 _LOGGER.error("Exception during Sigen %s %s: %s", method, url, e)
@@ -339,4 +354,97 @@ class SigenSmartLoadClient:
             self.control_mode = 1 if manual else 0
             return True
         _LOGGER.error("Error setting Sigen control mode: %s", res.text if res else "no response")
+        return False
+
+    # ------------------------------------------------------ energy profile
+    # System-wide (station-level) operation mode / saved profile selection -
+    # separate from the per-load Smart Port switch/mode above. Discovered
+    # from the mySigen web app's "operational profile" screen:
+    #   GET  /device/energy-profile/mode/all/{stationId}     -> options
+    #   GET  /device/energy-profile/mode/current/{stationId} -> current
+    #   PUT  /device/energy-profile/mode                     -> write
+    def fetch_profile_options(self):
+        """Fetch the list of selectable modes/profiles. Called once at setup
+        rather than every poll, since this rarely changes - a user's saved
+        profiles don't appear/disappear on their own."""
+        url = f"{self._base_url}/device/energy-profile/mode/all/{self._station_id}"
+        res = self._request("GET", url)
+        if res is None or res.status_code != 200:
+            _LOGGER.error("Sigen profile options read failed: %s", res.text if res else "no response")
+            return False
+        try:
+            body = res.json()
+        except ValueError:
+            _LOGGER.error("Sigen profile options read returned non-JSON: %s", res.text)
+            return False
+        if body.get("code") != 0:
+            _LOGGER.error("Sigen profile options read rejected: %s", body)
+            return False
+
+        data = body.get("data", {})
+        options = []
+        # Built-in system modes (Maximum Self-Powered, TOU, etc.) - these
+        # don't have a specific saved profile behind them, so we use -1 as
+        # the "no profile" sentinel, matching Sigen's own convention seen
+        # in the mode/all/template response.
+        for item in data.get("defaultWorkingModes", []):
+            label = item.get("label")
+            try:
+                mode = int(item.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if label:
+                options.append((label, mode, -1))
+        # The user's own saved custom profiles - always mode 9 (Custom),
+        # each with its own profileId.
+        for item in data.get("energyProfileItems", []):
+            label = item.get("name")
+            profile_id = item.get("profileId")
+            if label and profile_id is not None:
+                options.append((label, 9, profile_id))
+
+        self.profile_options = options
+        return True
+
+    def fetch_current_profile(self):
+        """Read which mode/profile is currently active. Cheap call, safe to
+        run alongside the regular Smart Port poll."""
+        url = f"{self._base_url}/device/energy-profile/mode/current/{self._station_id}"
+        res = self._request("GET", url)
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen current profile read failed: %s", res.text if res else "no response")
+            return False
+        try:
+            body = res.json()
+        except ValueError:
+            return False
+        if body.get("code") != 0:
+            return False
+
+        data = body.get("data", {})
+        self.current_energy_mode = data.get("currentMode")
+        self.current_profile_id = data.get("currentProfileId")
+        return True
+
+    def set_profile(self, mode: int, profile_id: int):
+        """Switch to a built-in mode (profile_id=-1) or one of the user's
+        saved custom profiles (mode=9, profile_id=<their profile's id>)."""
+        url = f"{self._base_url}/device/energy-profile/mode"
+        body = {
+            "stationId": int(self._station_id),
+            "operationMode": mode,
+            "profileId": profile_id,
+            "fromPlatform": 1,
+        }
+        res = self._request("PUT", url, json_body=body)
+        if res is not None and res.status_code == 200:
+            try:
+                ok = res.json().get("data") is True
+            except ValueError:
+                ok = False
+            if ok:
+                self.current_energy_mode = mode
+                self.current_profile_id = profile_id
+                return True
+        _LOGGER.error("Error setting Sigen energy profile: %s", res.text if res else "no response")
         return False
