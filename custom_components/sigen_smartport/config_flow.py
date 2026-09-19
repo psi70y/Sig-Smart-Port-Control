@@ -18,12 +18,15 @@ from .const import (
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
     CONF_SCAN_INTERVAL,
+    CONF_PROFILE_REFRESH_DAYS,
     DEFAULT_BASE_URL,
     DEFAULT_AUTH_HEADER,
     DEFAULT_USER_DEVICE_ID,
     DEFAULT_LOAD_PATH,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_PROFILE_REFRESH_DAYS,
     MIN_SCAN_INTERVAL,
+    MIN_PROFILE_REFRESH_DAYS,
 )
 from .sigen_api import SigenSmartLoadClient
 
@@ -45,6 +48,8 @@ STEP_ADVANCED_SCHEMA = vol.Schema({
     vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
     vol.Optional(CONF_AUTH_HEADER, default=DEFAULT_AUTH_HEADER): str,
     vol.Optional(CONF_USER_DEVICE_ID, default=DEFAULT_USER_DEVICE_ID): str,
+    vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=DEFAULT_PROFILE_REFRESH_DAYS):
+        vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
 })
 
 
@@ -128,12 +133,18 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self._config_entry.options.get(
+        current_scan_interval = self._config_entry.options.get(
             CONF_SCAN_INTERVAL,
             self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
+        current_profile_refresh_days = self._config_entry.options.get(
+            CONF_PROFILE_REFRESH_DAYS,
+            self._config_entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
+        )
         schema = vol.Schema({
-            vol.Optional(CONF_SCAN_INTERVAL, default=current):
+            vol.Optional(CONF_SCAN_INTERVAL, default=current_scan_interval):
                 vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+            vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days):
+                vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

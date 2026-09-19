@@ -15,7 +15,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 ## What's New in This Fork
 
 - **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds (configurable) and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
-- **Energy Profile control** — read and switch your system's overall operation mode/profile (Maximum Self-Powered, TOU, Fully Fed to Grid, or one of your own saved custom profiles), not just the Smart Port load.
+- **Energy Profile control** — read and switch your system's overall operation mode/profile (Maximum Self-Powered, TOU, Fully Fed to Grid, or one of your own saved custom profiles), not just the Smart Port load. The option list stays in sync automatically (see below).
 - **Session handling that doesn't log you out of the mySigen app** — token and refresh token persist to disk across restarts, and renewal uses Sigen's own `refresh_token` grant instead of a full password re-login. There's no explicit logout call; tokens simply expire naturally.
 - **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
@@ -29,7 +29,9 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Power switch**: turn a Smart Port load (e.g. hot water system, pool pump, EV charger) on or off manually, with state that reflects reality.
 - **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
 - **Energy Profile selector**: switch between built-in system modes and your own saved custom profiles, synced with the cloud.
+- **Refresh Energy Profiles button**: manually re-fetch the profile/mode option list on demand — useful right after creating a new custom profile in the mySigen app.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
+- **Configurable Energy Profile list refresh**: how often the full list of selectable profiles/modes is automatically re-checked in the background (default 30 days) — a safety net alongside the manual button.
 - **Automatic, restart-safe token management**: tokens (and refresh tokens) persist to disk and renew gently via a refresh grant, entirely behind the scenes — no re-authentication prompts, and no forced logouts of the mySigen app/web portal.
 
 ---
@@ -61,10 +63,10 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
    - **Load Path** — leave as `1` unless you have multiple Smart Port loads (see [Multiple Devices](#multiple-devices) below)
    - **Name** — a friendly name for this device
    - **Poll interval** — how often (in seconds) HA checks the cloud for real state; defaults to `300` (5 minutes)
-3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID) — only change these if you know you need to.
+3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID, and how often the full Energy Profile list is auto-refreshed — default `30` days) — only change these if you know you need to.
 4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
 
-The poll interval can be changed later at any time via **Settings → Devices & Services → Sigenergy Smart Port → Configure**, without needing to remove and re-add the device.
+The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Smart Port → Configure**, without needing to remove and re-add the device.
 
 ### Capturing your credentials
 
@@ -97,9 +99,16 @@ If the mySigen app or web portal gets logged out unexpectedly, please open an is
 In addition to the per-load Smart Port switch, this integration reads and controls your system's overall **Energy Profile** — the same setting shown when you tap the current mode/profile name in the mySigen app.
 
 - Appears as a **separate select entity** on its own device (**"Sigen Station {your station ID}"**), since this is a station-wide setting rather than something tied to a specific Smart Port load.
-- The list of options is pulled directly from your account — Sigenergy's built-in system modes (e.g. Maximum Self-Powered, TOU, Fully Fed to Grid) plus **any custom profiles you've saved yourself**, exactly as labeled in the mySigen app. Nothing is hardcoded, so this stays in sync automatically if you rename or add profiles.
-- The current selection is polled on the same schedule as the Smart Port status (governed by the same poll interval setting).
+- The list of options is pulled directly from your account — Sigenergy's built-in system modes (e.g. Maximum Self-Powered, TOU, Fully Fed to Grid) plus **any custom profiles you've saved yourself**, exactly as labeled in the mySigen app. Nothing is hardcoded, so labels stay accurate even if Sigen changes their wording.
+- The current selection is polled on the same schedule as the Smart Port status (governed by the poll interval setting).
 - If you have more than one Smart Port load configured on the same station, each config entry creates its own Energy Profile entity, but Home Assistant's device registry merges them under the same Station device rather than creating duplicates.
+
+### Keeping the profile list up to date
+
+The list of *selectable* profiles/modes (as opposed to which one is currently active) is deliberately not re-fetched on every poll, since it rarely changes. Two ways it stays current:
+
+- **Automatically**, on the interval set by the Energy Profile refresh setting (default 30 days, configurable at setup or via Configure).
+- **On demand**, via the **"Refresh Energy Profiles"** button on the Station device — press this right after creating a new custom profile in the mySigen app to make it available in HA immediately, without waiting for the automatic check or reloading the integration.
 
 ---
 
