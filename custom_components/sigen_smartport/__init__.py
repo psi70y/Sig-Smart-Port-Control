@@ -1,6 +1,7 @@
 """The Sigenergy Smart Port integration."""
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -18,7 +19,9 @@ from .const import (
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
     CONF_SCAN_INTERVAL,
+    CONF_PROFILE_REFRESH_DAYS,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_PROFILE_REFRESH_DAYS,
 )
 from .sigen_api import SigenSmartLoadClient
 
@@ -51,9 +54,11 @@ class SigenCoordinator(DataUpdateCoordinator):
     """Polls one Smart Port load (plus its station's energy profile) and
     hands the result to its entities."""
 
-    def __init__(self, hass: HomeAssistant, client: SigenSmartLoadClient, name: str, update_interval: timedelta):
+    def __init__(self, hass: HomeAssistant, client: SigenSmartLoadClient, name: str,
+                 update_interval: timedelta, profile_refresh_seconds: float):
         super().__init__(hass, _LOGGER, name=f"sigen_smartport_{name}", update_interval=update_interval)
         self.client = client
+        self.profile_refresh_seconds = profile_refresh_seconds
 
     async def _async_update_data(self):
         ok = await self.hass.async_add_executor_job(self.client.refresh)
@@ -65,6 +70,16 @@ class SigenCoordinator(DataUpdateCoordinator):
         # if it has trouble - the Smart Port switch/select should keep
         # working even if this optional station-level read fails.
         await self.hass.async_add_executor_job(self.client.fetch_current_profile)
+
+        # Periodically re-fetch the full list of selectable profiles/modes
+        # too, in case new ones were created via the mySigen app/web portal
+        # since setup or the last refresh. This is a safety net alongside
+        # the manual "Refresh Energy Profiles" button - infrequent by
+        # default (profile_refresh_seconds, default 30 days) since the
+        # list rarely changes.
+        fetched_at = self.client.profile_options_fetched_at
+        if fetched_at is None or (time.time() - fetched_at) >= self.profile_refresh_seconds:
+            await self.hass.async_add_executor_job(self.client.fetch_profile_options)
 
         return {
             "control_mode": self.client.control_mode,
@@ -130,6 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client,
         entry.unique_id or entry.entry_id,
         _get_scan_interval(entry),
+        _get_profile_refresh_seconds(entry),
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -150,6 +166,14 @@ def _get_scan_interval(entry: ConfigEntry) -> timedelta:
         CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
     return timedelta(seconds=seconds)
+
+
+def _get_profile_refresh_seconds(entry: ConfigEntry) -> float:
+    days = entry.options.get(
+        CONF_PROFILE_REFRESH_DAYS,
+        entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
+    )
+    return float(days) * 86400
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

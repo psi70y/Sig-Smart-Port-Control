@@ -99,6 +99,8 @@ class SigenSmartLoadClient:
         # / current_profile_id are refreshed each poll cycle alongside the
         # Smart Port status.
         self.profile_options = []     # list of (label, mode, profile_id)
+        self.profile_options_fetched_at = None  # epoch seconds, for the
+                                                  # periodic auto-refresh
         self.current_energy_mode = None
         self.current_profile_id = None
 
@@ -404,6 +406,7 @@ class SigenSmartLoadClient:
                 options.append((label, 9, profile_id))
 
         self.profile_options = options
+        self.profile_options_fetched_at = time.time()
         return True
 
     def fetch_current_profile(self):

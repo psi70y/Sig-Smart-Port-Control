@@ -19,7 +19,8 @@
         "data": {
           "base_url": "API base URL",
           "auth_header": "Auth header",
-          "user_device_id": "Device ID"
+          "user_device_id": "Device ID",
+          "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
       }
     },
@@ -36,10 +37,10 @@
         "title": "Sigen Smart Port options",
         "description": "How often Home Assistant polls the Sigen cloud for this device's real state. Lower values catch changes faster but log in more often - the default of 300s (5 minutes) is a sensible balance.",
         "data": {
-          "scan_interval": "Poll interval (seconds)"
+          "scan_interval": "Poll interval (seconds)",
+          "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
       }
     }
   }
 }
-
