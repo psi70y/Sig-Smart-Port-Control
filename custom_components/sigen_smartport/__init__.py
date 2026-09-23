@@ -22,6 +22,7 @@ from .const import (
     CONF_PROFILE_REFRESH_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
+    DEFAULT_BASE_URL,
 )
 from .sigen_api import SigenSmartLoadClient
 
@@ -123,7 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data[CONF_PASSWORD],
         data[CONF_STATION_ID],
         data[CONF_LOAD_PATH],
-        data[CONF_BASE_URL],
+        _get_base_url(entry),
         data[CONF_AUTH_HEADER],
         data[CONF_USER_DEVICE_ID],
         on_token_change=_persist_token,
@@ -166,6 +167,15 @@ def _get_scan_interval(entry: ConfigEntry) -> timedelta:
         CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
     return timedelta(seconds=seconds)
+
+
+def _get_base_url(entry: ConfigEntry) -> str:
+    # Options (set later via Configure) take priority over the value saved
+    # at initial setup, so changing region/base_url via Configure actually
+    # takes effect on the next reload rather than being silently ignored.
+    return entry.options.get(
+        CONF_BASE_URL, entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL)
+    )
 
 
 def _get_profile_refresh_seconds(entry: ConfigEntry) -> float:

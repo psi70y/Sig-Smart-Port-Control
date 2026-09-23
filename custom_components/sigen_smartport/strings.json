@@ -3,11 +3,12 @@
     "step": {
       "user": {
         "title": "Connect to Sigen Cloud",
-        "description": "Enter the same username/password you use in the mySigen app, plus your station ID. Find your station ID in the mySigen app URL or by asking your installer.",
+        "description": "Enter the same username/password you use in the mySigen app, plus your station ID and region. Find your station ID in the mySigen app URL or by asking your installer.",
         "data": {
           "username": "Username (email)",
           "password": "Password",
           "station_id": "Station ID",
+          "region": "Region",
           "load_path": "Load Path (leave as 1 unless you have multiple Smart Port loads)",
           "name": "Name for this device",
           "scan_interval": "Poll interval (seconds)"
@@ -15,9 +16,9 @@
       },
       "advanced": {
         "title": "Advanced settings",
-        "description": "These defaults work for most Australian accounts. Only change them if you know you need to.",
+        "description": "The API base URL below is only used if Region is set to Custom - otherwise it's set automatically from your region. Only change the other defaults if you know you need to.",
         "data": {
-          "base_url": "API base URL",
+          "base_url": "API base URL (only used if Region = Custom)",
           "auth_header": "Auth header",
           "user_device_id": "Device ID",
           "profile_refresh_days": "Refresh full Energy Profile list every (days)"
@@ -25,7 +26,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, and station ID."
+      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, and region."
     },
     "abort": {
       "already_configured": "This Smart Port load is already set up."
@@ -37,9 +38,23 @@
         "title": "Sigen Smart Port options",
         "description": "How often Home Assistant polls the Sigen cloud for this device's real state. Lower values catch changes faster but log in more often - the default of 300s (5 minutes) is a sensible balance.",
         "data": {
+          "region": "Region",
+          "base_url": "API base URL (only used if Region = Custom)",
           "scan_interval": "Poll interval (seconds)",
           "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
+      }
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "aus": "Australia / New Zealand",
+        "apac": "Asia-Pacific (rest)",
+        "eu": "Europe / Middle East / Africa",
+        "cn": "China",
+        "us": "United States / Latin America",
+        "custom": "Custom (enter API base URL manually)"
       }
     }
   }

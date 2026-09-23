@@ -15,6 +15,7 @@ from .const import (
     CONF_STATION_ID,
     CONF_LOAD_PATH,
     CONF_BASE_URL,
+    CONF_REGION,
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
     CONF_SCAN_INTERVAL,
@@ -25,8 +26,12 @@ from .const import (
     DEFAULT_LOAD_PATH,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
+    DEFAULT_REGION,
     MIN_SCAN_INTERVAL,
     MIN_PROFILE_REFRESH_DAYS,
+    REGION_BASE_URLS,
+    REGION_CHOICES,
+    CUSTOM_REGION,
 )
 from .sigen_api import SigenSmartLoadClient
 
@@ -36,6 +41,7 @@ STEP_USER_SCHEMA = vol.Schema({
     vol.Required(CONF_USERNAME): str,
     vol.Required(CONF_PASSWORD): str,
     vol.Required(CONF_STATION_ID): str,
+    vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(REGION_CHOICES),
     vol.Optional(CONF_LOAD_PATH, default=DEFAULT_LOAD_PATH): str,
     vol.Optional(CONF_NAME, default="Sigen Smart Load"): str,
     vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL):
@@ -43,7 +49,10 @@ STEP_USER_SCHEMA = vol.Schema({
 })
 
 # Advanced/rarely-changed fields, kept out of the main form so the common
-# path (one station, default region endpoint) stays a 3-field wizard.
+# path (one station, pick your region) stays a compact wizard. base_url
+# here is only actually used when region is set to "Custom" above - for
+# any known region it's overwritten with that region's real endpoint
+# before the entry is saved (see _resolve_base_url).
 STEP_ADVANCED_SCHEMA = vol.Schema({
     vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
     vol.Optional(CONF_AUTH_HEADER, default=DEFAULT_AUTH_HEADER): str,
@@ -51,6 +60,16 @@ STEP_ADVANCED_SCHEMA = vol.Schema({
     vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=DEFAULT_PROFILE_REFRESH_DAYS):
         vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
 })
+
+
+def _resolve_base_url(data: dict) -> dict:
+    """Overwrite base_url with the selected region's real endpoint, unless
+    the region is explicitly set to Custom (in which case whatever was
+    typed into the Advanced step's base_url field is used as-is)."""
+    region = data.get(CONF_REGION, DEFAULT_REGION)
+    if region != CUSTOM_REGION and region in REGION_BASE_URLS:
+        data[CONF_BASE_URL] = REGION_BASE_URLS[region]
+    return data
 
 
 class CannotConnect(HomeAssistantError):
@@ -97,6 +116,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             data = {**self._user_input, **user_input}
+            data = _resolve_base_url(data)
 
             # One entry per station_id + load_path, so re-adding the same
             # physical Smart Port load is blocked, but adding a second load
@@ -131,8 +151,14 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(title="", data=_resolve_base_url(dict(user_input)))
 
+        current_region = self._config_entry.options.get(
+            CONF_REGION, self._config_entry.data.get(CONF_REGION, DEFAULT_REGION)
+        )
+        current_base_url = self._config_entry.options.get(
+            CONF_BASE_URL, self._config_entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL)
+        )
         current_scan_interval = self._config_entry.options.get(
             CONF_SCAN_INTERVAL,
             self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -142,6 +168,8 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
             self._config_entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
         )
         schema = vol.Schema({
+            vol.Optional(CONF_REGION, default=current_region): vol.In(REGION_CHOICES),
+            vol.Optional(CONF_BASE_URL, default=current_base_url): str,
             vol.Optional(CONF_SCAN_INTERVAL, default=current_scan_interval):
                 vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
             vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days):
