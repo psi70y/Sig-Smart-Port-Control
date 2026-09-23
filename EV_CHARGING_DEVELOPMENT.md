@@ -39,7 +39,10 @@ capability-by-capability rather than as a single release.
   in Section 6
 - Installs and tests development builds of `feature/ev-charging` directly
   against their own hardware, and reports results
-- Not expected to write code, though contributions are welcome if desired
+
+**All integration code is written by the Maintainer.** The Contributor's
+role is capture and testing only - this keeps a single, consistent
+authorship and review path for code entering the repository.
 
 ## 5. Working Method
 
@@ -80,7 +83,10 @@ Response:
 ```
 
 Where a single screen or action triggers multiple requests, all of them
-should be captured together.
+should be captured together. Where a setting has an enumerated set of
+values (a mode, a strategy, etc.), round-trip confirmation - setting each
+value via the UI and reading it back - is preferred over inferring values
+from list order or field position.
 
 ## 7. Data Handling
 
@@ -109,13 +115,84 @@ that this is acceptable for the duration of this work, including the
 possibility of temporary instability while a given capability is still
 under test.
 
-## 9. Release
+## 9. Architecture Decisions
 
-Once a capability (or a coherent group of capabilities) is confirmed
-working, the Maintainer merges `feature/ev-charging` into `main` and cuts
-a standard tagged release, with accompanying README and changelog updates.
+### 9.1 Multiple ownership scenarios
 
-## 10. Notes on Scope and Pace
+Users may have a Smart Port load only, an EV charger only, or both, on the
+same or different stations. No configuration path may assume one implies
+the other.
+
+### 9.2 EV Charger as its own config entry type
+
+An EV charger is identified by `stationId` + `snCode`, not `loadPath`, and
+is a physically distinct device from any Smart Port load. Rather than
+attaching EV charger entities to an existing Smart Port config entry (as
+Energy Profile currently does, for expedience), EV Charger setup will be
+its own config entry type, offered as a separate option in the setup
+wizard, requiring only username/password/station ID/charger serial - no
+dependency on a Smart Port load existing.
+
+### 9.3 New `sensor.py` platform
+
+No existing platform in this integration (`switch`, `select`, `button`)
+fits read-only telemetry (plug status, live current, energy totals). EV
+charging introduces this integration's first `sensor.py` platform.
+
+### 9.4 External reference: solidfox/sigenergy-cloud
+
+An independent open-source client library,
+[solidfox/sigenergy-cloud](https://github.com/solidfox/sigenergy-cloud),
+and a companion Home Assistant integration built on it
+(`homeassistant-sigenergy-cloud`), appear to already implement DC EV
+charger ("EVDC") support, based on their published release notes. This is
+a useful reference for narrowing down what to look for when DC charging
+capture begins, but is not a substitute for the process in Section 5 -
+anything drawn from it is treated as a hypothesis to be confirmed against
+real captured traffic, the same as any other lead. Licensing terms should
+be checked before adapting anything beyond general endpoint knowledge.
+
+## 10. Confirmed Findings — AC Charging
+
+Recorded here as they're locked in, so they don't need to be dug out of
+issue history later. Hardware: Sigen EVAC 22 4G T2 WH, firmware
+V100R001C10SPC114, EU region.
+
+### Charging Mode
+
+Write: `POST /device/charge/mode/ac` with body
+`{"stationId": ..., "snCode": ..., "chargeMode": <int>}` →
+`{"code":0,"data":true}` on success. Read back via the *same* endpoint
+(`GET /device/charge/mode/ac`), not `/device/acevse/charge/mode`, which
+uses a different, non-matching enum for the same-looking field name.
+
+| UI Label | `chargeMode` value | Status |
+|---|---|---|
+| Fast Charging | `0` | Confirmed (round-trip) |
+| PV Surplus Charging | `1` | Confirmed (round-trip) |
+| Sigen AI Mode | likely `2` | **Not confirmed** - selecting it in the UI requires a one-time setup flow before it can be saved; no write has been captured yet |
+
+### Other confirmed fields on `/device/charge/mode/ac`
+
+| Field | UI control |
+|---|---|
+| `enableFromPack` | Battery Boost toggle |
+| `cutoffSocFromPack` | Cut-Off SOC (range from `/device/charge/mode/soc/range`: 5-100) |
+| `enableFromGrid` | Grid Charging toggle |
+| `maxPowerFromGrid` | Max power from grid (kW) |
+
+### Still open
+
+- `/device/acevse/charge/status`: `0` confirmed as "not plugged in"; `3`
+  observed during an active session; other values and their meanings not
+  yet mapped. Plan: ship as a raw status code sensor initially, refine the
+  enum as more states are naturally observed through use.
+- `/device/acevse/charge/mode`'s own fields (`minKeepChargeTime`,
+  `maxGridChargePower`, `pvEnergyStartPower`) have no known UI control -
+  left unexposed until a use is identified.
+- Sigen AI Mode's write value and its one-time setup flow.
+
+## 11. Notes on Scope and Pace
 
 Given the asynchronous, remote nature of this arrangement, progress is
 expected to be incremental. Shipping a small, confirmed-working capability
