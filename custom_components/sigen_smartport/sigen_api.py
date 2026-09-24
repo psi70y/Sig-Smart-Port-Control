@@ -1,14 +1,24 @@
-"""Shared Sigenergy Smart Port API client.
+"""Shared Sigenergy Cloud API clients.
 
-Handles token caching and the three known cloud calls:
-  - GET   .../control-mode              -> read current switch + mode state
-  - PATCH .../control-mode/manual/switch -> set contactor on/off
-  - PATCH .../control-mode               -> set Auto/Manual mode
+_SigenBaseClient holds everything common to any Sigen device: token
+caching, the refresh_token-preferred renewal flow, and the low-level
+authenticated request helper. Two concrete clients build on it:
 
-One client instance is shared (cached) per station_id + load_path so the
-switch and select entities poll the cloud together and reuse a single token,
-instead of each entity managing its own state and re-authenticating on every
-action.
+  - SigenSmartLoadClient: Smart Port load control/mode + Energy Profile
+    GET   .../control-mode                 -> read switch + mode state
+    PATCH .../control-mode/manual/switch   -> set contactor on/off
+    PATCH .../control-mode                 -> set Auto/Manual mode
+    GET/PUT .../energy-profile/mode/...    -> station-wide operation mode
+
+  - SigenAcChargerClient: AC EV charger status + charging mode
+    GET  .../acevse/charge/status          -> plug/charge status code
+    GET  .../acevse/charge/read/current    -> live charge current
+    GET/POST .../charge/mode/ac            -> charging mode (Fast/PV Surplus)
+    GET  .../data-process/acevse/energy    -> energy totals
+
+Each config entry (one Smart Port load, or one AC charger) gets its own
+client instance with its own token cache, so a restart or a token refresh
+on one entry never affects another.
 """
 
 import logging
@@ -42,34 +52,15 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
 )
 
-# Module-level cache so switch.py and select.py share one client
-# (and therefore one token + one polled state) per station/load combo.
-_CLIENTS = {}
 
+class _SigenBaseClient:
+    """Auth + low-level request handling shared by every Sigen client."""
 
-def get_client(username, password, station_id, load_path, base_url,
-                auth_header, user_device_id):
-    """Return a shared client instance for this station/load combination."""
-    key = (base_url, station_id, load_path, username)
-    client = _CLIENTS.get(key)
-    if client is None:
-        client = SigenSmartLoadClient(
-            username, password, station_id, load_path, base_url,
-            auth_header, user_device_id,
-        )
-        _CLIENTS[key] = client
-    return client
-
-
-class SigenSmartLoadClient:
-    """Wraps auth + read/write calls for a single Smart Port load."""
-
-    def __init__(self, username, password, station_id, load_path, base_url,
+    def __init__(self, username, password, station_id, base_url,
                  auth_header, user_device_id, on_token_change=None):
         self._username = username
         self._password = password
         self._station_id = station_id
-        self._load_path = load_path
         self._base_url = base_url
         self._auth_header = auth_header
         self._user_device_id = user_device_id
@@ -86,23 +77,7 @@ class SigenSmartLoadClient:
                                    # process restart, when restored from disk.
         self._refresh_token = None
 
-        # Last known state read from the cloud. None until first successful
-        # poll. Consumers (switch/select entities) read this after calling
-        # refresh().
-        self.control_mode = None      # 0 = Auto (Sig Schedule), 1 = Manual
-        self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
         self.available = False
-
-        # Energy/operation profile state (system-wide, not per Smart Port
-        # load - keyed by station_id only). profile_options is fetched once
-        # (it rarely changes) rather than on every poll; current_energy_mode
-        # / current_profile_id are refreshed each poll cycle alongside the
-        # Smart Port status.
-        self.profile_options = []     # list of (label, mode, profile_id)
-        self.profile_options_fetched_at = None  # epoch seconds, for the
-                                                  # periodic auto-refresh
-        self.current_energy_mode = None
-        self.current_profile_id = None
 
     def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
         """Reload a previously-persisted token (e.g. after a restart) so we
@@ -147,9 +122,6 @@ class SigenSmartLoadClient:
         self._token = token
         self._refresh_token = data.get("refresh_token", self._refresh_token)
 
-        # Trust Sigen's own expiry when it's provided, minus a safety
-        # buffer, instead of a hardcoded guess. Falls back to the
-        # conservative default if the field is ever missing or malformed.
         expires_in = data.get("expires_in")
         if isinstance(expires_in, (int, float)) and expires_in > _TOKEN_EXPIRY_BUFFER_SECONDS:
             ttl = expires_in - _TOKEN_EXPIRY_BUFFER_SECONDS
@@ -161,19 +133,14 @@ class SigenSmartLoadClient:
             try:
                 self._on_token_change(self._token, self._token_expiry, self._refresh_token)
             except Exception as e:  # noqa: BLE001
-                # Persisting the token is a nice-to-have; never let a
-                # storage problem break a login that already succeeded.
                 _LOGGER.debug("Could not persist Sigen token (non-fatal): %s", e)
 
         return token
 
     # ---------------------------------------------------------------- auth
     def _refresh_with_token(self):
-        """Renew using the refresh_token grant - this is what Sigen's own
-        mySigen app does near expiry, rather than a full password re-login.
-        Returns the new access token, or None if the refresh_token itself
-        was rejected (expired/invalid), in which case the caller should
-        fall back to a full password login."""
+        """Renew using the refresh_token grant - what Sigen's own app does
+        near expiry, rather than a full password re-login."""
         if not self._refresh_token:
             return None
 
@@ -199,17 +166,11 @@ class SigenSmartLoadClient:
             _LOGGER.debug("Sigen refresh_token grant rejected, will fall back to full login: %s", response.text)
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("Exception during Sigen token refresh (will fall back to full login): %s", e)
-        # A rejected/failed refresh means the refresh_token is no longer
-        # usable - clear it so we don't keep retrying a dead token.
         self._refresh_token = None
         return None
 
     def _password_login(self):
-        """Full password-grant login. Used only on first-ever setup or when
-        a refresh_token isn't available/valid - Sigen's own app appears to
-        treat this as a new sign-in, which is the behaviour suspected of
-        forcing other active sessions (the mySigen app/web portal) to log
-        out, so this is deliberately the fallback path, not the primary one."""
+        """Full password-grant login - fallback path only, see module docstring."""
         token_url = f"{self._base_url}/auth/oauth/token"
         payload = {
             "scope": "server",
@@ -239,9 +200,6 @@ class SigenSmartLoadClient:
         return None
 
     def _fetch_token(self):
-        """Get a new access token, preferring the gentle refresh_token grant
-        (what Sigen's own app uses) and only falling back to a full
-        password login if that's not possible."""
         token = self._refresh_with_token()
         if token:
             return token
@@ -271,12 +229,7 @@ class SigenSmartLoadClient:
         }
 
     def _request(self, method, url, params=None, json_body=None):
-        """Issue a request, retrying once with a fresh token on auth failure.
-
-        Smart Port calls send everything as query params (even for
-        PATCH/PUT); the energy-profile write call instead needs a JSON
-        request body - json_body is optional and only used where needed.
-        """
+        """Issue a request, retrying once with a fresh token on auth failure."""
         for attempt in (False, True):
             token = self._get_token(force=attempt)
             if not token:
@@ -291,13 +244,30 @@ class SigenSmartLoadClient:
                 return None
 
             if res.status_code == 401:
-                # Token stale/rejected - retry once with a forced refresh.
                 continue
 
             return res
         return None
 
-    # ---------------------------------------------------------------- calls
+
+class SigenSmartLoadClient(_SigenBaseClient):
+    """Wraps read/write calls for a single Smart Port load, plus its
+    station's Energy Profile."""
+
+    def __init__(self, username, password, station_id, load_path, base_url,
+                 auth_header, user_device_id, on_token_change=None):
+        super().__init__(username, password, station_id, base_url,
+                          auth_header, user_device_id, on_token_change)
+        self._load_path = load_path
+
+        self.control_mode = None      # 0 = Auto (Sig Schedule), 1 = Manual
+        self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
+
+        self.profile_options = []     # list of (label, mode, profile_id)
+        self.profile_options_fetched_at = None
+        self.current_energy_mode = None
+        self.current_profile_id = None
+
     def refresh(self):
         """Read current control mode + manual switch state from the cloud."""
         url = f"{self._base_url}/device/tp-device/smart-loads/control-mode"
@@ -359,16 +329,9 @@ class SigenSmartLoadClient:
         return False
 
     # ------------------------------------------------------ energy profile
-    # System-wide (station-level) operation mode / saved profile selection -
-    # separate from the per-load Smart Port switch/mode above. Discovered
-    # from the mySigen web app's "operational profile" screen:
-    #   GET  /device/energy-profile/mode/all/{stationId}     -> options
-    #   GET  /device/energy-profile/mode/current/{stationId} -> current
-    #   PUT  /device/energy-profile/mode                     -> write
     def fetch_profile_options(self):
         """Fetch the list of selectable modes/profiles. Called once at setup
-        rather than every poll, since this rarely changes - a user's saved
-        profiles don't appear/disappear on their own."""
+        rather than every poll, since this rarely changes."""
         url = f"{self._base_url}/device/energy-profile/mode/all/{self._station_id}"
         res = self._request("GET", url)
         if res is None or res.status_code != 200:
@@ -385,10 +348,6 @@ class SigenSmartLoadClient:
 
         data = body.get("data", {})
         options = []
-        # Built-in system modes (Maximum Self-Powered, TOU, etc.) - these
-        # don't have a specific saved profile behind them, so we use -1 as
-        # the "no profile" sentinel, matching Sigen's own convention seen
-        # in the mode/all/template response.
         for item in data.get("defaultWorkingModes", []):
             label = item.get("label")
             try:
@@ -397,8 +356,6 @@ class SigenSmartLoadClient:
                 continue
             if label:
                 options.append((label, mode, -1))
-        # The user's own saved custom profiles - always mode 9 (Custom),
-        # each with its own profileId.
         for item in data.get("energyProfileItems", []):
             label = item.get("name")
             profile_id = item.get("profileId")
@@ -410,8 +367,7 @@ class SigenSmartLoadClient:
         return True
 
     def fetch_current_profile(self):
-        """Read which mode/profile is currently active. Cheap call, safe to
-        run alongside the regular Smart Port poll."""
+        """Read which mode/profile is currently active."""
         url = f"{self._base_url}/device/energy-profile/mode/current/{self._station_id}"
         res = self._request("GET", url)
         if res is None or res.status_code != 200:
@@ -450,4 +406,135 @@ class SigenSmartLoadClient:
                 self.current_profile_id = profile_id
                 return True
         _LOGGER.error("Error setting Sigen energy profile: %s", res.text if res else "no response")
+        return False
+
+
+class SigenAcChargerClient(_SigenBaseClient):
+    """Wraps read/write calls for a single AC EV charger.
+
+    Endpoints confirmed by network capture against a Sigen EVAC 22 4G T2 WH
+    (EU region) - see EV_CHARGING_DEVELOPMENT.md for the full capture log
+    and what remains unconfirmed (Sigen AI Mode's write value, the full
+    charge/status enum beyond 0="not plugged in").
+    """
+
+    def __init__(self, username, password, station_id, charger_sn, base_url,
+                 auth_header, user_device_id, on_token_change=None):
+        super().__init__(username, password, station_id, base_url,
+                          auth_header, user_device_id, on_token_change)
+        self._charger_sn = charger_sn
+
+        self.charge_status_code = None
+        self.charge_mode = None       # 0=Fast Charging, 1=PV Surplus, (2=Sigen AI, unconfirmed)
+        self.last_set_current = None  # amps
+        self.max_current = None       # amps
+        self.monthly_energy = None    # kWh
+        self.weekly_energy = None     # kWh
+        self.lifetime_energy = None   # kWh
+
+    def _params(self, **extra):
+        params = {"stationId": self._station_id, "snCode": self._charger_sn}
+        params.update(extra)
+        return params
+
+    def refresh(self):
+        """Read all AC charger telemetry + settings in one poll cycle.
+
+        Each sub-read is independent - a hiccup on one (e.g. the energy
+        totals endpoint) doesn't block the others from updating, and
+        doesn't mark the whole device unavailable. Only a hard failure of
+        the primary status read does that.
+        """
+        status_ok = self._fetch_charge_status()
+        self.available = status_ok
+        if not status_ok:
+            return False
+
+        self._fetch_charge_current()
+        self._fetch_charge_mode()
+        self._fetch_energy_totals()
+        return True
+
+    def _fetch_charge_status(self):
+        url = f"{self._base_url}/device/acevse/charge/status"
+        res = self._request("GET", url, self._params())
+        if res is None or res.status_code != 200:
+            _LOGGER.error("Sigen AC charger status read failed: %s", res.text if res else "no response")
+            return False
+        try:
+            body = res.json()
+        except ValueError:
+            _LOGGER.error("Sigen AC charger status read returned non-JSON: %s", res.text)
+            return False
+        if body.get("code") != 0:
+            _LOGGER.error("Sigen AC charger status read rejected: %s", body)
+            return False
+        self.charge_status_code = body.get("data")
+        return True
+
+    def _fetch_charge_current(self):
+        url = f"{self._base_url}/device/acevse/charge/read/current"
+        res = self._request("GET", url, self._params())
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen AC charger current read failed: %s", res.text if res else "no response")
+            return
+        try:
+            data = res.json().get("data", {}) or {}
+        except ValueError:
+            return
+        self.last_set_current = data.get("lastSetCurrent")
+        self.max_current = data.get("maxCurrent")
+
+    def _fetch_charge_mode(self):
+        # Read from /device/charge/mode/ac, NOT /device/acevse/charge/mode -
+        # the two endpoints use different, non-matching chargeMode enums
+        # for a same-looking field name. This is the one that matches the
+        # write endpoint below. See EV_CHARGING_DEVELOPMENT.md Section 10.
+        url = f"{self._base_url}/device/charge/mode/ac"
+        res = self._request("GET", url, self._params())
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen AC charger mode read failed: %s", res.text if res else "no response")
+            return
+        try:
+            data = res.json().get("data", {}) or {}
+        except ValueError:
+            return
+        self.charge_mode = data.get("chargeMode")
+
+    def _fetch_energy_totals(self):
+        url = f"{self._base_url}/data-process/acevse/energy"
+        res = self._request("GET", url, self._params())
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen AC charger energy read failed: %s", res.text if res else "no response")
+            return
+        try:
+            data = res.json().get("data", {}) or {}
+        except ValueError:
+            return
+        self.monthly_energy = data.get("monthlyEnergy")
+        self.weekly_energy = data.get("weeklyEnergy")
+        self.lifetime_energy = data.get("lifetimeEnergy")
+
+    def set_charge_mode(self, mode: int):
+        """Set the Charging Mode (0=Fast Charging, 1=PV Surplus Charging).
+
+        Sigen AI Mode (likely 2) is deliberately not offered here - see the
+        class docstring.
+        """
+        url = f"{self._base_url}/device/charge/mode/ac"
+        body = {
+            "stationId": int(self._station_id),
+            "snCode": self._charger_sn,
+            "chargeMode": mode,
+        }
+        res = self._request("POST", url, json_body=body)
+        if res is not None and res.status_code == 200:
+            try:
+                ok = res.json().get("data") is True
+            except ValueError:
+                ok = False
+            if ok:
+                self.charge_mode = mode
+                return True
+        _LOGGER.error("Error setting Sigen AC charger mode: %s", res.text if res else "no response")
         return False

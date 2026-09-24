@@ -2,6 +2,13 @@
   "config": {
     "step": {
       "user": {
+        "title": "Add a Sigenergy device",
+        "menu_options": {
+          "smart_port": "Smart Port Load",
+          "ac_charger": "AC EV Charger"
+        }
+      },
+      "smart_port": {
         "title": "Connect to Sigen Cloud",
         "description": "Enter the same username/password you use in the mySigen app, plus your station ID and region. Find your station ID in the mySigen app URL or by asking your installer.",
         "data": {
@@ -14,7 +21,7 @@
           "scan_interval": "Poll interval (seconds)"
         }
       },
-      "advanced": {
+      "smart_port_advanced": {
         "title": "Advanced settings",
         "description": "The API base URL below is only used if Region is set to Custom - otherwise it's set automatically from your region. Only change the other defaults if you know you need to.",
         "data": {
@@ -23,13 +30,35 @@
           "user_device_id": "Device ID",
           "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
+      },
+      "ac_charger": {
+        "title": "Connect your AC Charger to Sigen Cloud",
+        "description": "Enter the same username/password you use in the mySigen app, your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info).",
+        "data": {
+          "username": "Username (email)",
+          "password": "Password",
+          "station_id": "Station ID",
+          "region": "Region",
+          "charger_sn": "Charger Serial Number",
+          "name": "Name for this device",
+          "scan_interval": "Poll interval (seconds)"
+        }
+      },
+      "ac_charger_advanced": {
+        "title": "Advanced settings",
+        "description": "The API base URL below is only used if Region is set to Custom - otherwise it's set automatically from your region. Only change the other defaults if you know you need to.",
+        "data": {
+          "base_url": "API base URL (only used if Region = Custom)",
+          "auth_header": "Auth header",
+          "user_device_id": "Device ID"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, and region."
+      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, region, and (for chargers) the serial number."
     },
     "abort": {
-      "already_configured": "This Smart Port load is already set up."
+      "already_configured": "This device is already set up."
     }
   },
   "options": {

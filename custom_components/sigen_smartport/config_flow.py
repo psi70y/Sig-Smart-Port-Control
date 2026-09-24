@@ -1,4 +1,4 @@
-"""Config flow for Sigenergy Smart Port."""
+"""Config flow for Sigenergy Smart Port + AC Charger."""
 
 import logging
 
@@ -12,8 +12,12 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
     DOMAIN,
+    CONF_DEVICE_KIND,
+    DEVICE_KIND_SMART_PORT,
+    DEVICE_KIND_AC_CHARGER,
     CONF_STATION_ID,
     CONF_LOAD_PATH,
+    CONF_CHARGER_SN,
     CONF_BASE_URL,
     CONF_REGION,
     CONF_AUTH_HEADER,
@@ -33,11 +37,12 @@ from .const import (
     REGION_CHOICES,
     CUSTOM_REGION,
 )
-from .sigen_api import SigenSmartLoadClient
+from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_SCHEMA = vol.Schema({
+# --------------------------------------------------------------- Smart Port
+STEP_SMART_PORT_SCHEMA = vol.Schema({
     vol.Required(CONF_USERNAME): str,
     vol.Required(CONF_PASSWORD): str,
     vol.Required(CONF_STATION_ID): str,
@@ -53,12 +58,32 @@ STEP_USER_SCHEMA = vol.Schema({
 # here is only actually used when region is set to "Custom" above - for
 # any known region it's overwritten with that region's real endpoint
 # before the entry is saved (see _resolve_base_url).
-STEP_ADVANCED_SCHEMA = vol.Schema({
+STEP_SMART_PORT_ADVANCED_SCHEMA = vol.Schema({
     vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
     vol.Optional(CONF_AUTH_HEADER, default=DEFAULT_AUTH_HEADER): str,
     vol.Optional(CONF_USER_DEVICE_ID, default=DEFAULT_USER_DEVICE_ID): str,
     vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=DEFAULT_PROFILE_REFRESH_DAYS):
         vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
+})
+
+# ---------------------------------------------------------------- AC Charger
+STEP_AC_CHARGER_SCHEMA = vol.Schema({
+    vol.Required(CONF_USERNAME): str,
+    vol.Required(CONF_PASSWORD): str,
+    vol.Required(CONF_STATION_ID): str,
+    vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(REGION_CHOICES),
+    vol.Required(CONF_CHARGER_SN): str,
+    vol.Optional(CONF_NAME, default="Sigen AC Charger"): str,
+    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL):
+        vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+})
+
+# No profile_refresh_days here - that setting is specific to Smart Port's
+# Energy Profile feature, which an AC Charger entry has nothing to do with.
+STEP_AC_CHARGER_ADVANCED_SCHEMA = vol.Schema({
+    vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
+    vol.Optional(CONF_AUTH_HEADER, default=DEFAULT_AUTH_HEADER): str,
+    vol.Optional(CONF_USER_DEVICE_ID, default=DEFAULT_USER_DEVICE_ID): str,
 })
 
 
@@ -76,7 +101,7 @@ class CannotConnect(HomeAssistantError):
     """Raised when we can't reach or authenticate against the Sigen cloud."""
 
 
-async def _validate_login(hass: HomeAssistant, data: dict) -> None:
+async def _validate_smart_port_login(hass: HomeAssistant, data: dict) -> None:
     """Attempt a real login + one status read to confirm the credentials work."""
     client = SigenSmartLoadClient(
         data[CONF_USERNAME],
@@ -92,8 +117,24 @@ async def _validate_login(hass: HomeAssistant, data: dict) -> None:
         raise CannotConnect
 
 
+async def _validate_ac_charger_login(hass: HomeAssistant, data: dict) -> None:
+    """Attempt a real login + one status read to confirm the credentials work."""
+    client = SigenAcChargerClient(
+        data[CONF_USERNAME],
+        data[CONF_PASSWORD],
+        data[CONF_STATION_ID],
+        data[CONF_CHARGER_SN],
+        data[CONF_BASE_URL],
+        data[CONF_AUTH_HEADER],
+        data[CONF_USER_DEVICE_ID],
+    )
+    ok = await hass.async_add_executor_job(client.refresh)
+    if not ok:
+        raise CannotConnect
+
+
 class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the setup wizard for a single Smart Port load."""
+    """Handle the setup wizard - Smart Port Load or AC Charger."""
 
     VERSION = 1
 
@@ -101,17 +142,26 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._user_input: dict = {}
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
+        """First step: choose which kind of device to add."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["smart_port", "ac_charger"],
+        )
+
+    # --------------------------------------------------------- Smart Port
+    async def async_step_smart_port(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
             self._user_input = dict(user_input)
-            return await self.async_step_advanced()
+            self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_SMART_PORT
+            return await self.async_step_smart_port_advanced()
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors
+            step_id="smart_port", data_schema=STEP_SMART_PORT_SCHEMA, errors=errors
         )
 
-    async def async_step_advanced(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_smart_port_advanced(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -127,14 +177,53 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
-                await _validate_login(self.hass, data)
+                await _validate_smart_port_login(self.hass, data)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_create_entry(title=data[CONF_NAME], data=data)
 
         return self.async_show_form(
-            step_id="advanced", data_schema=STEP_ADVANCED_SCHEMA, errors=errors
+            step_id="smart_port_advanced", data_schema=STEP_SMART_PORT_ADVANCED_SCHEMA, errors=errors
+        )
+
+    # --------------------------------------------------------- AC Charger
+    async def async_step_ac_charger(self, user_input: dict | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._user_input = dict(user_input)
+            self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_AC_CHARGER
+            return await self.async_step_ac_charger_advanced()
+
+        return self.async_show_form(
+            step_id="ac_charger", data_schema=STEP_AC_CHARGER_SCHEMA, errors=errors
+        )
+
+    async def async_step_ac_charger_advanced(self, user_input: dict | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            data = {**self._user_input, **user_input}
+            data = _resolve_base_url(data)
+
+            # Separate unique_id namespace (ac_ prefix) from Smart Port
+            # loads, keyed by charger serial rather than load_path - an AC
+            # charger and a Smart Port load on the same station are always
+            # distinct entries even if someone reused a matching identifier.
+            unique_id = f"ac_{data[CONF_STATION_ID]}_{data[CONF_CHARGER_SN]}"
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured()
+
+            try:
+                await _validate_ac_charger_login(self.hass, data)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_create_entry(title=data[CONF_NAME], data=data)
+
+        return self.async_show_form(
+            step_id="ac_charger_advanced", data_schema=STEP_AC_CHARGER_ADVANCED_SCHEMA, errors=errors
         )
 
     @staticmethod
@@ -143,8 +232,8 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
-    """Lets the poll interval be changed later via 'Configure' without
-    deleting and re-adding the device."""
+    """Lets region/poll interval/etc be changed later via 'Configure'
+    without deleting and re-adding the device."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
@@ -153,26 +242,30 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=_resolve_base_url(dict(user_input)))
 
-        current_region = self._config_entry.options.get(
-            CONF_REGION, self._config_entry.data.get(CONF_REGION, DEFAULT_REGION)
+        entry = self._config_entry
+        is_ac_charger = entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER
+
+        current_region = entry.options.get(CONF_REGION, entry.data.get(CONF_REGION, DEFAULT_REGION))
+        current_base_url = entry.options.get(CONF_BASE_URL, entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL))
+        current_scan_interval = entry.options.get(
+            CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         )
-        current_base_url = self._config_entry.options.get(
-            CONF_BASE_URL, self._config_entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL)
-        )
-        current_scan_interval = self._config_entry.options.get(
-            CONF_SCAN_INTERVAL,
-            self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        )
-        current_profile_refresh_days = self._config_entry.options.get(
-            CONF_PROFILE_REFRESH_DAYS,
-            self._config_entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
-        )
-        schema = vol.Schema({
+
+        schema_dict = {
             vol.Optional(CONF_REGION, default=current_region): vol.In(REGION_CHOICES),
             vol.Optional(CONF_BASE_URL, default=current_base_url): str,
             vol.Optional(CONF_SCAN_INTERVAL, default=current_scan_interval):
                 vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
-            vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days):
-                vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
-        })
-        return self.async_show_form(step_id="init", data_schema=schema)
+        }
+
+        # Energy Profile refresh interval only applies to Smart Port entries.
+        if not is_ac_charger:
+            current_profile_refresh_days = entry.options.get(
+                CONF_PROFILE_REFRESH_DAYS,
+                entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
+            )
+            schema_dict[vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days)] = (
+                vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS))
+            )
+
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

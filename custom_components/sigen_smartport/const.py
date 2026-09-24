@@ -4,10 +4,20 @@ from homeassistant.const import Platform
 
 DOMAIN = "sigen_smartport"
 
-PLATFORMS = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON]
+# Each config entry is one of these "kinds". Existing entries created before
+# this distinction existed have no CONF_DEVICE_KIND stored at all - treat
+# that as DEVICE_KIND_SMART_PORT for backward compatibility (see
+# _get_device_kind in __init__.py).
+CONF_DEVICE_KIND = "device_kind"
+DEVICE_KIND_SMART_PORT = "smart_port"
+DEVICE_KIND_AC_CHARGER = "ac_charger"
+
+PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON]
+PLATFORMS_AC_CHARGER = [Platform.SENSOR]
 
 CONF_STATION_ID = "station_id"
 CONF_LOAD_PATH = "load_path"
+CONF_CHARGER_SN = "charger_sn"
 CONF_BASE_URL = "base_url"
 CONF_REGION = "region"
 CONF_AUTH_HEADER = "auth_header"
@@ -46,3 +56,16 @@ MIN_PROFILE_REFRESH_DAYS = 1
 
 MODE_AUTO = "Auto (Sig Schedule)"
 MODE_MANUAL = "Manual"
+
+# AC charger "Charging Mode" - confirmed by round-trip capture (set via UI,
+# read back from /device/charge/mode/ac) against a Sigen EVAC 22 4G T2 WH.
+# Sigen AI Mode (likely chargeMode=2) is deliberately excluded: selecting it
+# in the app requires a one-time setup flow before it can be saved, and no
+# write for it has been captured yet. See EV_CHARGING_DEVELOPMENT.md.
+AC_CHARGE_MODE_FAST = "Fast Charging"
+AC_CHARGE_MODE_PV_SURPLUS = "PV Surplus Charging"
+AC_CHARGE_MODE_VALUES = {
+    AC_CHARGE_MODE_FAST: 0,
+    AC_CHARGE_MODE_PV_SURPLUS: 1,
+}
+AC_CHARGE_MODE_LABELS = {value: label for label, value in AC_CHARGE_MODE_VALUES.items()}
