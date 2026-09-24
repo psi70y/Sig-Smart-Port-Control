@@ -67,9 +67,12 @@ STEP_SMART_PORT_ADVANCED_SCHEMA = vol.Schema({
 })
 
 # ---------------------------------------------------------------- AC Charger
+# Username/password may be left blank when a Smart Port entry for the same
+# station already exists - its stored credentials are reused (see
+# _credentials_from_existing_entry), so they don't have to be captured twice.
 STEP_AC_CHARGER_SCHEMA = vol.Schema({
-    vol.Required(CONF_USERNAME): str,
-    vol.Required(CONF_PASSWORD): str,
+    vol.Optional(CONF_USERNAME): str,
+    vol.Optional(CONF_PASSWORD): str,
     vol.Required(CONF_STATION_ID): str,
     vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(REGION_CHOICES),
     vol.Required(CONF_CHARGER_SN): str,
@@ -188,13 +191,31 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # --------------------------------------------------------- AC Charger
+    def _credentials_from_existing_entry(self, station_id: str) -> dict | None:
+        """Username/password from an existing entry on the same station, so an
+        AC charger can be added without re-capturing the encoded password."""
+        for entry in self._async_current_entries(include_ignore=False):
+            data = entry.data
+            if (str(data.get(CONF_STATION_ID)) == str(station_id)
+                    and data.get(CONF_USERNAME) and data.get(CONF_PASSWORD)):
+                return {CONF_USERNAME: data[CONF_USERNAME], CONF_PASSWORD: data[CONF_PASSWORD]}
+        return None
+
     async def async_step_ac_charger(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._user_input = dict(user_input)
-            self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_AC_CHARGER
-            return await self.async_step_ac_charger_advanced()
+            user_input = dict(user_input)
+            if not user_input.get(CONF_USERNAME) or not user_input.get(CONF_PASSWORD):
+                existing = self._credentials_from_existing_entry(user_input[CONF_STATION_ID])
+                if existing:
+                    user_input.update(existing)
+                else:
+                    errors["base"] = "cannot_connect"
+            if not errors:
+                self._user_input = user_input
+                self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_AC_CHARGER
+                return await self.async_step_ac_charger_advanced()
 
         return self.async_show_form(
             step_id="ac_charger", data_schema=STEP_AC_CHARGER_SCHEMA, errors=errors
