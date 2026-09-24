@@ -181,6 +181,26 @@ uses a different, non-matching enum for the same-looking field name.
 | `enableFromGrid` | Grid Charging toggle |
 | `maxPowerFromGrid` | Max power from grid (kW) |
 
+**Writes confirmed** (EVAC 22, EU region) by POSTing the full current
+payload with one field changed, then reading back: all four fields change
+and the others stay untouched. Quirks:
+
+- Turning `enableFromGrid` off forces `maxPowerFromGrid` to `0`, and a
+  `maxPowerFromGrid` sent while grid charging is off is ignored.
+- Turning `enableFromGrid` on only works if a `maxPowerFromGrid` > 0 is sent
+  in the same request - with `0` or the field omitted the cloud still
+  answers `{"code":0,"data":true}` but leaves grid charging off. The
+  integration remembers the last non-zero value and sends it on re-enable.
+- Because each write carries the full payload, concurrent writes overwrite
+  each other; the client serialises them with a lock.
+
+### Session expiry
+
+An expired or revoked token is answered with **HTTP 424**,
+`{"code":1,"msg":"用户凭证已过期"}` ("user credentials expired"), not 401.
+It is now retried like a 401; before that, an entry stayed unavailable until
+the next HA restart.
+
 ### Still open
 
 - `/device/acevse/charge/status`: `0` confirmed as "not plugged in"; `3`

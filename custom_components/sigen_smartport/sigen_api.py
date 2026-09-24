@@ -22,6 +22,7 @@ on one entry never affects another.
 """
 
 import logging
+import threading
 import time
 from datetime import datetime
 
@@ -243,7 +244,10 @@ class _SigenBaseClient:
                 _LOGGER.error("Exception during Sigen %s %s: %s", method, url, e)
                 return None
 
-            if res.status_code == 401:
+            # The cloud answers an expired/revoked token with HTTP 424 and
+            # code 1, msg "user credentials expired" (in Chinese) - seen in
+            # practice - so treat it like 401 and retry with a new token.
+            if res.status_code in (401, 424):
                 continue
 
             return res
@@ -427,6 +431,10 @@ class SigenAcChargerClient(_SigenBaseClient):
         self.charge_status_code = None
         self.charge_mode = None       # 0=Fast Charging, 1=PV Surplus, (2=Sigen AI, unconfirmed)
         self.charge_mode_settings = {}  # full /device/charge/mode/ac payload (Battery Boost, grid charging, ...)
+        self.last_grid_power = None   # last non-zero maxPowerFromGrid, reused when Grid Charging is re-enabled
+        # Each settings write sends the full payload, so concurrent writes
+        # (e.g. two automations) would overwrite each other - serialise them.
+        self._settings_lock = threading.Lock()
         self.last_set_current = None  # amps
         self.max_current = None       # amps
         self.monthly_energy = None    # kWh
@@ -502,6 +510,8 @@ class SigenAcChargerClient(_SigenBaseClient):
             return
         self.charge_mode = data.get("chargeMode")
         self.charge_mode_settings = data
+        if data.get("maxPowerFromGrid"):
+            self.last_grid_power = data["maxPowerFromGrid"]
 
     def _fetch_energy_totals(self):
         url = f"{self._base_url}/data-process/acevse/energy"
@@ -540,3 +550,33 @@ class SigenAcChargerClient(_SigenBaseClient):
                 return True
         _LOGGER.error("Error setting Sigen AC charger mode: %s", res.text if res else "no response")
         return False
+
+    def set_charge_settings(self, **changes):
+        """Change one or more /device/charge/mode/ac fields (enableFromPack,
+        cutoffSocFromPack, enableFromGrid, maxPowerFromGrid).
+
+        Sends the full current payload with the changes merged in, which is
+        confirmed not to disturb the other fields. The cloud answers
+        {"data": true} even for writes it silently ignores (e.g. enabling
+        grid charging with maxPowerFromGrid 0), so callers should refresh
+        and read the real state back afterwards.
+        """
+        fields = ("chargeMode", "enableFromPack", "cutoffSocFromPack",
+                  "enableFromGrid", "maxPowerFromGrid")
+        with self._settings_lock:
+            body = {"stationId": int(self._station_id), "snCode": self._charger_sn}
+            body.update({k: self.charge_mode_settings[k] for k in fields
+                         if self.charge_mode_settings.get(k) is not None})
+            body.update(changes)
+            url = f"{self._base_url}/device/charge/mode/ac"
+            res = self._request("POST", url, json_body=body)
+            if res is not None and res.status_code == 200:
+                try:
+                    ok = res.json().get("data") is True
+                except ValueError:
+                    ok = False
+                if ok:
+                    self.charge_mode_settings = {**self.charge_mode_settings, **changes}
+                    return True
+            _LOGGER.error("Error writing Sigen AC charger settings %s: %s", changes, res.text if res else "no response")
+            return False

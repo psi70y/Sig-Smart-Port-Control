@@ -13,7 +13,7 @@ DEVICE_KIND_SMART_PORT = "smart_port"
 DEVICE_KIND_AC_CHARGER = "ac_charger"
 
 PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON]
-PLATFORMS_AC_CHARGER = [Platform.SENSOR, Platform.SELECT]
+PLATFORMS_AC_CHARGER = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER]
 
 CONF_STATION_ID = "station_id"
 CONF_LOAD_PATH = "load_path"
@@ -69,3 +69,26 @@ AC_CHARGE_MODE_VALUES = {
     AC_CHARGE_MODE_PV_SURPLUS: 1,
 }
 AC_CHARGE_MODE_LABELS = {value: label for label, value in AC_CHARGE_MODE_VALUES.items()}
+
+# Other /device/charge/mode/ac fields - confirmed by write + read-back
+# against an EVAC 22 (EU region). Sending the full current payload with one
+# field changed leaves the others untouched.
+AC_FIELD_BATTERY_BOOST = "enableFromPack"
+AC_FIELD_CUTOFF_SOC = "cutoffSocFromPack"
+AC_FIELD_GRID_CHARGING = "enableFromGrid"
+AC_FIELD_MAX_GRID_POWER = "maxPowerFromGrid"
+AC_CHARGE_SETTING_FIELDS = [
+    "chargeMode",
+    AC_FIELD_BATTERY_BOOST,
+    AC_FIELD_CUTOFF_SOC,
+    AC_FIELD_GRID_CHARGING,
+    AC_FIELD_MAX_GRID_POWER,
+]
+# Range reported by GET /device/charge/mode/soc/range.
+AC_CUTOFF_SOC_MIN = 5
+AC_CUTOFF_SOC_MAX = 100
+AC_MAX_GRID_POWER_KW = 22.0
+# Grid Charging only turns on if a max power > 0 is sent with it (otherwise
+# the cloud answers success but leaves it off), and turning it off forces
+# max power to 0. This is used if no earlier non-zero value is known.
+AC_FALLBACK_GRID_POWER_KW = 1.0
