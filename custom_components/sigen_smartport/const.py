@@ -13,7 +13,7 @@ DEVICE_KIND_SMART_PORT = "smart_port"
 DEVICE_KIND_AC_CHARGER = "ac_charger"
 
 PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON]
-PLATFORMS_AC_CHARGER = [Platform.SENSOR]
+PLATFORMS_AC_CHARGER = [Platform.SENSOR, Platform.SELECT]
 
 CONF_STATION_ID = "station_id"
 CONF_LOAD_PATH = "load_path"

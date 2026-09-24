@@ -1,4 +1,4 @@
-"""Select platform for Sigenergy Smart Port - config-entry based."""
+"""Select platform for Sigenergy Smart Port / AC Charger - config-entry based."""
 
 import logging
 
@@ -9,7 +9,17 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_STATION_ID, MODE_AUTO, MODE_MANUAL
+from .const import (
+    DOMAIN,
+    CONF_STATION_ID,
+    CONF_CHARGER_SN,
+    CONF_DEVICE_KIND,
+    DEVICE_KIND_AC_CHARGER,
+    MODE_AUTO,
+    MODE_MANUAL,
+    AC_CHARGE_MODE_VALUES,
+    AC_CHARGE_MODE_LABELS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,6 +30,9 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    if entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER:
+        async_add_entities([SigenAcChargerModeSelector(coordinator, entry)])
+        return
     async_add_entities([
         SigenSmartPortModeSelector(coordinator, entry),
         SigenEnergyProfileSelector(coordinator, entry),
@@ -123,3 +136,55 @@ class SigenEnergyProfileSelector(CoordinatorEntity, SelectEntity):
                     await self.coordinator.async_request_refresh()
                     _LOGGER.info("Changed Sigen energy profile to: %s", option)
                 return
+
+
+class SigenAcChargerModeSelector(CoordinatorEntity, SelectEntity):
+    """AC charger Charging Mode (Fast Charging / PV Surplus Charging).
+
+    Only the two round-trip-confirmed values are offered; Sigen AI Mode is
+    left out until its write is captured (see EV_CHARGING_DEVELOPMENT.md).
+    The rest of the /device/charge/mode/ac payload (Battery Boost, grid
+    charging, cut-off SOC, ...) is exposed read-only as attributes.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Charging Mode"
+    _attr_options = list(AC_CHARGE_MODE_VALUES)
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator)
+        self._entry = entry
+        station_id = entry.data[CONF_STATION_ID]
+        charger_sn = entry.data[CONF_CHARGER_SN]
+        self._attr_unique_id = f"{station_id}_{charger_sn}_charge_mode_select"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"ac_charger_{station_id}_{charger_sn}")},
+            name=entry.title,
+            manufacturer="Sigenergy",
+            model="AC EV Charger",
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
+
+    @property
+    def current_option(self) -> str | None:
+        # None (shown as unknown) for a mode outside the offered options,
+        # e.g. Sigen AI Mode selected in the app.
+        return AC_CHARGE_MODE_LABELS.get(self.coordinator.data.get("charge_mode"))
+
+    @property
+    def extra_state_attributes(self):
+        settings = dict(self.coordinator.data.get("charge_mode_settings") or {})
+        settings.pop("snCode", None)
+        settings.pop("stationId", None)
+        return settings
+
+    async def async_select_option(self, option: str) -> None:
+        mode = AC_CHARGE_MODE_VALUES[option]
+        client = self.coordinator.client
+        ok = await self.hass.async_add_executor_job(client.set_charge_mode, mode)
+        if ok:
+            _LOGGER.info("Changed Sigen AC charger charging mode to: %s", option)
+        await self.coordinator.async_request_refresh()

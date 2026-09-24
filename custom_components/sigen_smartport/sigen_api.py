@@ -426,6 +426,7 @@ class SigenAcChargerClient(_SigenBaseClient):
 
         self.charge_status_code = None
         self.charge_mode = None       # 0=Fast Charging, 1=PV Surplus, (2=Sigen AI, unconfirmed)
+        self.charge_mode_settings = {}  # full /device/charge/mode/ac payload (Battery Boost, grid charging, ...)
         self.last_set_current = None  # amps
         self.max_current = None       # amps
         self.monthly_energy = None    # kWh
@@ -500,6 +501,7 @@ class SigenAcChargerClient(_SigenBaseClient):
         except ValueError:
             return
         self.charge_mode = data.get("chargeMode")
+        self.charge_mode_settings = data
 
     def _fetch_energy_totals(self):
         url = f"{self._base_url}/data-process/acevse/energy"

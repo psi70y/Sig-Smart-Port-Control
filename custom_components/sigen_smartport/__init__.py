@@ -111,6 +111,7 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
         return {
             "charge_status_code": self.client.charge_status_code,
             "charge_mode": self.client.charge_mode,
+            "charge_mode_settings": self.client.charge_mode_settings,
             "last_set_current": self.client.last_set_current,
             "max_current": self.client.max_current,
             "monthly_energy": self.client.monthly_energy,
