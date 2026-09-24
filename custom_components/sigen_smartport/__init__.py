@@ -12,9 +12,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     DOMAIN,
-    PLATFORMS,
+    PLATFORMS_SMART_PORT,
+    PLATFORMS_AC_CHARGER,
+    CONF_DEVICE_KIND,
+    DEVICE_KIND_SMART_PORT,
+    DEVICE_KIND_AC_CHARGER,
     CONF_STATION_ID,
     CONF_LOAD_PATH,
+    CONF_CHARGER_SN,
     CONF_BASE_URL,
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
@@ -24,7 +29,7 @@ from .const import (
     DEFAULT_PROFILE_REFRESH_DAYS,
     DEFAULT_BASE_URL,
 )
-from .sigen_api import SigenSmartLoadClient
+from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,8 +95,44 @@ class SigenCoordinator(DataUpdateCoordinator):
         }
 
 
+class SigenAcChargerCoordinator(DataUpdateCoordinator):
+    """Polls one AC EV charger and hands the result to its sensors."""
+
+    def __init__(self, hass: HomeAssistant, client: SigenAcChargerClient, name: str,
+                 update_interval: timedelta):
+        super().__init__(hass, _LOGGER, name=f"sigen_ac_charger_{name}", update_interval=update_interval)
+        self.client = client
+
+    async def _async_update_data(self):
+        ok = await self.hass.async_add_executor_job(self.client.refresh)
+        if not ok:
+            raise UpdateFailed("Could not read AC charger status from Sigen cloud")
+
+        return {
+            "charge_status_code": self.client.charge_status_code,
+            "charge_mode": self.client.charge_mode,
+            "last_set_current": self.client.last_set_current,
+            "max_current": self.client.max_current,
+            "monthly_energy": self.client.monthly_energy,
+            "weekly_energy": self.client.weekly_energy,
+            "lifetime_energy": self.client.lifetime_energy,
+        }
+
+
+def _get_device_kind(entry: ConfigEntry) -> str:
+    """Entries created before AC charger support have no device_kind stored -
+    they are always Smart Port loads."""
+    return entry.data.get(CONF_DEVICE_KIND, DEVICE_KIND_SMART_PORT)
+
+
+def _get_platforms(entry: ConfigEntry) -> list:
+    if _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER:
+        return PLATFORMS_AC_CHARGER
+    return PLATFORMS_SMART_PORT
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Sigen Smart Port from a config entry."""
+    """Set up a Sigen Smart Port load or AC charger from a config entry."""
     _ensure_default_log_level()
 
     data = entry.data
@@ -119,16 +160,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Sigen Smart Port: saved refreshed auth token to disk (valid until %s)", expiry_str
         )
 
-    client = SigenSmartLoadClient(
-        data[CONF_USERNAME],
-        data[CONF_PASSWORD],
-        data[CONF_STATION_ID],
-        data[CONF_LOAD_PATH],
-        _get_base_url(entry),
-        data[CONF_AUTH_HEADER],
-        data[CONF_USER_DEVICE_ID],
-        on_token_change=_persist_token,
-    )
+    is_ac_charger = _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER
+
+    if is_ac_charger:
+        client = SigenAcChargerClient(
+            data[CONF_USERNAME],
+            data[CONF_PASSWORD],
+            data[CONF_STATION_ID],
+            data[CONF_CHARGER_SN],
+            _get_base_url(entry),
+            data[CONF_AUTH_HEADER],
+            data[CONF_USER_DEVICE_ID],
+            on_token_change=_persist_token,
+        )
+    else:
+        client = SigenSmartLoadClient(
+            data[CONF_USERNAME],
+            data[CONF_PASSWORD],
+            data[CONF_STATION_ID],
+            data[CONF_LOAD_PATH],
+            _get_base_url(entry),
+            data[CONF_AUTH_HEADER],
+            data[CONF_USER_DEVICE_ID],
+            on_token_change=_persist_token,
+        )
 
     if stored_token:
         client.restore_cached_token(
@@ -136,6 +191,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_token.get("expiry"),
             stored_token.get("refresh_token"),
         )
+
+    if is_ac_charger:
+        ac_coordinator = SigenAcChargerCoordinator(
+            hass,
+            client,
+            entry.unique_id or entry.entry_id,
+            _get_scan_interval(entry),
+        )
+        await ac_coordinator.async_config_entry_first_refresh()
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        return True
 
     # Energy profile options (the user's saved profiles + built-in modes)
     # rarely change, so fetch this once at setup rather than every poll.
@@ -152,7 +220,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_SMART_PORT)
 
     # If the scan interval is changed later via the "Configure" button on
     # the integration entry, reload it so the new interval takes effect
@@ -193,7 +261,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, _get_platforms(entry))
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
