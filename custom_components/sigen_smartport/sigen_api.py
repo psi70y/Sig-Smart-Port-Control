@@ -80,6 +80,13 @@ class _SigenBaseClient:
 
         self.available = False
 
+        # Station-wide Energy Profile - any client type can read/write it,
+        # since it only needs the station ID.
+        self.profile_options = []     # list of (label, mode, profile_id)
+        self.profile_options_fetched_at = None
+        self.current_energy_mode = None
+        self.current_profile_id = None
+
     def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
         """Reload a previously-persisted token (e.g. after a restart) so we
         don't force a fresh login unless it's actually expired."""
@@ -253,85 +260,6 @@ class _SigenBaseClient:
             return res
         return None
 
-
-class SigenSmartLoadClient(_SigenBaseClient):
-    """Wraps read/write calls for a single Smart Port load, plus its
-    station's Energy Profile."""
-
-    def __init__(self, username, password, station_id, load_path, base_url,
-                 auth_header, user_device_id, on_token_change=None):
-        super().__init__(username, password, station_id, base_url,
-                          auth_header, user_device_id, on_token_change)
-        self._load_path = load_path
-
-        self.control_mode = None      # 0 = Auto (Sig Schedule), 1 = Manual
-        self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
-
-        self.profile_options = []     # list of (label, mode, profile_id)
-        self.profile_options_fetched_at = None
-        self.current_energy_mode = None
-        self.current_profile_id = None
-
-    def refresh(self):
-        """Read current control mode + manual switch state from the cloud."""
-        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode"
-        params = {"stationId": self._station_id, "loadPath": self._load_path}
-        res = self._request("GET", url, params)
-        if res is None:
-            self.available = False
-            return False
-
-        if res.status_code != 200:
-            _LOGGER.error("Sigen status read failed: HTTP %s - %s", res.status_code, res.text)
-            self.available = False
-            return False
-
-        try:
-            body = res.json()
-        except ValueError:
-            _LOGGER.error("Sigen status read returned non-JSON: %s", res.text)
-            self.available = False
-            return False
-
-        if body.get("code") != 0:
-            _LOGGER.error("Sigen status read rejected: %s", body)
-            self.available = False
-            return False
-
-        data = body.get("data", {})
-        self.control_mode = data.get("controlMode")
-        self.manual_switch = data.get("manualModeSwitch")
-        self.available = True
-        return True
-
-    def set_manual_switch(self, on: bool):
-        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode/manual/switch"
-        params = {
-            "stationId": self._station_id,
-            "loadPath": self._load_path,
-            "manualSwitch": 1 if on else 0,
-        }
-        res = self._request("PATCH", url, params)
-        if res is not None and res.status_code == 200:
-            self.manual_switch = 1 if on else 0
-            return True
-        _LOGGER.error("Error setting Sigen manual switch: %s", res.text if res else "no response")
-        return False
-
-    def set_control_mode(self, manual: bool):
-        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode"
-        params = {
-            "stationId": self._station_id,
-            "loadPath": self._load_path,
-            "controlMode": 1 if manual else 0,
-        }
-        res = self._request("PATCH", url, params)
-        if res is not None and res.status_code == 200:
-            self.control_mode = 1 if manual else 0
-            return True
-        _LOGGER.error("Error setting Sigen control mode: %s", res.text if res else "no response")
-        return False
-
     # ------------------------------------------------------ energy profile
     def fetch_profile_options(self):
         """Fetch the list of selectable modes/profiles. Called once at setup
@@ -412,6 +340,79 @@ class SigenSmartLoadClient(_SigenBaseClient):
         _LOGGER.error("Error setting Sigen energy profile: %s", res.text if res else "no response")
         return False
 
+
+class SigenSmartLoadClient(_SigenBaseClient):
+    """Wraps read/write calls for a single Smart Port load. The station's
+    Energy Profile calls live on the shared base class."""
+
+    def __init__(self, username, password, station_id, load_path, base_url,
+                 auth_header, user_device_id, on_token_change=None):
+        super().__init__(username, password, station_id, base_url,
+                          auth_header, user_device_id, on_token_change)
+        self._load_path = load_path
+
+        self.control_mode = None      # 0 = Auto (Sig Schedule), 1 = Manual
+        self.manual_switch = None     # 0 = contactor open/off, 1 = closed/on
+
+    def refresh(self):
+        """Read current control mode + manual switch state from the cloud."""
+        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode"
+        params = {"stationId": self._station_id, "loadPath": self._load_path}
+        res = self._request("GET", url, params)
+        if res is None:
+            self.available = False
+            return False
+
+        if res.status_code != 200:
+            _LOGGER.error("Sigen status read failed: HTTP %s - %s", res.status_code, res.text)
+            self.available = False
+            return False
+
+        try:
+            body = res.json()
+        except ValueError:
+            _LOGGER.error("Sigen status read returned non-JSON: %s", res.text)
+            self.available = False
+            return False
+
+        if body.get("code") != 0:
+            _LOGGER.error("Sigen status read rejected: %s", body)
+            self.available = False
+            return False
+
+        data = body.get("data", {})
+        self.control_mode = data.get("controlMode")
+        self.manual_switch = data.get("manualModeSwitch")
+        self.available = True
+        return True
+
+    def set_manual_switch(self, on: bool):
+        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode/manual/switch"
+        params = {
+            "stationId": self._station_id,
+            "loadPath": self._load_path,
+            "manualSwitch": 1 if on else 0,
+        }
+        res = self._request("PATCH", url, params)
+        if res is not None and res.status_code == 200:
+            self.manual_switch = 1 if on else 0
+            return True
+        _LOGGER.error("Error setting Sigen manual switch: %s", res.text if res else "no response")
+        return False
+
+    def set_control_mode(self, manual: bool):
+        url = f"{self._base_url}/device/tp-device/smart-loads/control-mode"
+        params = {
+            "stationId": self._station_id,
+            "loadPath": self._load_path,
+            "controlMode": 1 if manual else 0,
+        }
+        res = self._request("PATCH", url, params)
+        if res is not None and res.status_code == 200:
+            self.control_mode = 1 if manual else 0
+            return True
+        _LOGGER.error("Error setting Sigen control mode: %s", res.text if res else "no response")
+        return False
 
 class SigenAcChargerClient(_SigenBaseClient):
     """Wraps read/write calls for a single AC EV charger.
