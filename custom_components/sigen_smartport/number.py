@@ -63,8 +63,9 @@ class SigenAcChargerMaxGridPowerNumber(SigenAcChargerEntity, NumberEntity):
     """Max power drawn from the grid while Grid Charging is on.
 
     The cloud forces this to 0 whenever Grid Charging is off and ignores
-    writes to it then, so while it's off a new value is only remembered and
-    applied the next time Grid Charging is switched on.
+    writes to it then, so while it's off a new value is only remembered (on
+    disk, so it survives HA restarts) and applied the next time Grid
+    Charging is switched on.
     """
 
     _attr_name = "Grid Charging Max Power"
@@ -93,4 +94,5 @@ class SigenAcChargerMaxGridPowerNumber(SigenAcChargerEntity, NumberEntity):
             await self._write(**{AC_FIELD_MAX_GRID_POWER: value})
         else:
             _LOGGER.info("Sigen AC charger: grid charging is off - max grid power %s kW saved for when it's enabled", value)
+            await self.coordinator.async_save_grid_power()
             self.async_write_ha_state()

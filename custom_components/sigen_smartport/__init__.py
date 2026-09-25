@@ -35,6 +35,14 @@ _LOGGER = logging.getLogger(__name__)
 
 # Bumped only if the persisted token file's shape ever changes.
 TOKEN_STORAGE_VERSION = 1
+# Bumped only if the persisted AC charger settings file's shape ever changes.
+AC_CHARGER_STORAGE_VERSION = 1
+
+
+def _ac_charger_store(hass: HomeAssistant, entry: ConfigEntry) -> Store:
+    """Per-entry file for AC charger values the cloud can't give back to us,
+    kept separate from the token file so auth storage is never touched."""
+    return Store(hass, AC_CHARGER_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_ac_charger")
 
 
 def _ensure_default_log_level() -> None:
@@ -99,14 +107,27 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
     """Polls one AC EV charger and hands the result to its sensors."""
 
     def __init__(self, hass: HomeAssistant, client: SigenAcChargerClient, name: str,
-                 update_interval: timedelta):
+                 update_interval: timedelta, store: Store, saved_grid_power=None):
         super().__init__(hass, _LOGGER, name=f"sigen_ac_charger_{name}", update_interval=update_interval)
         self.client = client
+        self._store = store
+        self._saved_grid_power = saved_grid_power
+
+    async def async_save_grid_power(self) -> None:
+        """Persist the last non-zero Grid Charging max power, so re-enabling
+        Grid Charging after an HA restart still uses it (the cloud reports 0
+        while Grid Charging is off). Only writes to disk when it changed."""
+        power = self.client.last_grid_power
+        if power and power != self._saved_grid_power:
+            await self._store.async_save({"last_grid_power": power})
+            self._saved_grid_power = power
+            _LOGGER.debug("Sigen AC charger: saved grid charging max power %s kW to disk", power)
 
     async def _async_update_data(self):
         ok = await self.hass.async_add_executor_job(self.client.refresh)
         if not ok:
             raise UpdateFailed("Could not read AC charger status from Sigen cloud")
+        await self.async_save_grid_power()
 
         return {
             "charge_status_code": self.client.charge_status_code,
@@ -194,11 +215,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     if is_ac_charger:
+        ac_store = _ac_charger_store(hass, entry)
+        saved = await ac_store.async_load() or {}
+        saved_grid_power = saved.get("last_grid_power")
+        # Seed the client with the saved value; the first poll overrides it
+        # if Grid Charging is currently on (the cloud then reports the real one).
+        client.last_grid_power = saved_grid_power
         ac_coordinator = SigenAcChargerCoordinator(
             hass,
             client,
             entry.unique_id or entry.entry_id,
             _get_scan_interval(entry),
+            ac_store,
+            saved_grid_power,
         )
         await ac_coordinator.async_config_entry_first_refresh()
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
@@ -273,3 +302,5 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     (not just unloaded/reloaded)."""
     store: Store = Store(hass, TOKEN_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_token")
     await store.async_remove()
+    if _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER:
+        await _ac_charger_store(hass, entry).async_remove()
