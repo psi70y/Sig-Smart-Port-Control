@@ -532,24 +532,12 @@ class SigenAcChargerClient(_SigenBaseClient):
 
         Sigen AI Mode (likely 2) is deliberately not offered here - see the
         class docstring.
+
+        Goes through set_charge_settings so it shares its lock and cached
+        payload: a mode change followed quickly by another settings write
+        (e.g. in one automation) can't send the old mode back.
         """
-        url = f"{self._base_url}/device/charge/mode/ac"
-        body = {
-            "stationId": int(self._station_id),
-            "snCode": self._charger_sn,
-            "chargeMode": mode,
-        }
-        res = self._request("POST", url, json_body=body)
-        if res is not None and res.status_code == 200:
-            try:
-                ok = res.json().get("data") is True
-            except ValueError:
-                ok = False
-            if ok:
-                self.charge_mode = mode
-                return True
-        _LOGGER.error("Error setting Sigen AC charger mode: %s", res.text if res else "no response")
-        return False
+        return self.set_charge_settings(chargeMode=mode)
 
     def set_charge_settings(self, **changes):
         """Change one or more /device/charge/mode/ac fields (enableFromPack,
@@ -577,6 +565,8 @@ class SigenAcChargerClient(_SigenBaseClient):
                     ok = False
                 if ok:
                     self.charge_mode_settings = {**self.charge_mode_settings, **changes}
+                    if "chargeMode" in changes:
+                        self.charge_mode = changes["chargeMode"]
                     return True
             _LOGGER.error("Error writing Sigen AC charger settings %s: %s", changes, res.text if res else "no response")
             return False
