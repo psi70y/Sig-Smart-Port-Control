@@ -15,7 +15,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 ## What's New in This Fork
 
 - **Two-way sync** — the original wrote commands but never read anything back, so HA's state was just "whatever we last told the cloud to do." This fork polls the cloud every 60 seconds (configurable) and reflects the *actual* switch state and mode — including correctly after a Home Assistant restart, instead of resetting to defaults.
-- **Energy Profile control** — read and switch your system's overall operation mode/profile (Maximum Self-Powered, TOU, Fully Fed to Grid, or one of your own saved custom profiles), not just the Smart Port load. The option list stays in sync automatically (see below).
+- **Energy Profile control** — read and switch your system's overall operation mode/profile (Maximum Self-Powered, TOU, Fully Fed to Grid, or one of your own saved custom profiles), available with a Smart Port load, an AC EV Charger, or both — only ever one per station. The option list stays in sync automatically (see below).
 - **Session handling that doesn't log you out of the mySigen app** — token and refresh token persist to disk across restarts, and renewal uses Sigen's own `refresh_token` grant instead of a full password re-login. There's no explicit logout call; tokens simply expire naturally.
 - **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
@@ -99,12 +99,13 @@ If the mySigen app or web portal gets logged out unexpectedly, please open an is
 
 ## Energy Profile
 
-In addition to the per-load Smart Port switch, this integration reads and controls your system's overall **Energy Profile** — the same setting shown when you tap the current mode/profile name in the mySigen app.
+Whether you've set up a Smart Port load, an AC EV Charger, or both, this integration reads and controls your system's overall **Energy Profile** — the same setting shown when you tap the current mode/profile name in the mySigen app.
 
-- Appears as a **separate select entity** on its own device (**"Sigen Station {your station ID}"**), since this is a station-wide setting rather than something tied to a specific Smart Port load.
+- Appears as a **separate select entity** on its own device (**"Sigen Station {your station ID}"**), since this is a station-wide setting rather than something tied to a specific Smart Port load or charger.
 - The list of options is pulled directly from your account — Sigenergy's built-in system modes (e.g. Maximum Self-Powered, TOU, Fully Fed to Grid) plus **any custom profiles you've saved yourself**, exactly as labeled in the mySigen app. Nothing is hardcoded, so labels stay accurate even if Sigen changes their wording.
-- The current selection is polled on the same schedule as the Smart Port status (governed by the poll interval setting).
-- If you have more than one Smart Port load configured on the same station, each config entry creates its own Energy Profile entity, but Home Assistant's device registry merges them under the same Station device rather than creating duplicates.
+- The current selection is polled on the same schedule as the entry that provides it (governed by that entry's poll interval setting).
+- **One Energy Profile per station.** You get exactly one Energy Profile select and one Refresh button per station, however many entries you add for it (several Smart Port loads, a Smart Port load plus an AC charger, or an AC charger on its own). The first entry set up for the station provides them; the others skip them.
+- If the entry providing them is deleted or disabled, another entry on the same station takes over automatically. The entity IDs stay the same, so automations and dashboards keep working.
 
 ### Keeping the profile list up to date
 
@@ -127,7 +128,9 @@ If you have a Sigenergy AC EV Charger on the same station, it can be added as it
    - **Station ID** and **Region** — as for a Smart Port load
    - **Charger Serial Number** — shown in the mySigen app on the charger's Device Info screen
    - **Name** and **Poll interval**
-3. The **Advanced** step (API base URL, auth header, device ID) works the same as for a Smart Port load.
+3. The **Advanced** step (API base URL, auth header, device ID, Energy Profile list refresh interval) works the same as for a Smart Port load.
+
+A charger-only setup also gets the station's **Energy Profile** select and **Refresh Energy Profiles** button (see [Energy Profile](#energy-profile)). If you already have a Smart Port entry on the same station, the charger doesn't add a second one.
 
 The charger gets its own login session and its own token file, so it follows the same restart-safe session handling described below.
 
