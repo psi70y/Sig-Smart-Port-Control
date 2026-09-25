@@ -81,12 +81,14 @@ STEP_AC_CHARGER_SCHEMA = vol.Schema({
         vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
 })
 
-# No profile_refresh_days here - that setting is specific to Smart Port's
-# Energy Profile feature, which an AC Charger entry has nothing to do with.
+# profile_refresh_days is included because an AC charger entry can own its
+# station's Energy Profile entities (e.g. a charger-only setup).
 STEP_AC_CHARGER_ADVANCED_SCHEMA = vol.Schema({
     vol.Optional(CONF_BASE_URL, default=DEFAULT_BASE_URL): str,
     vol.Optional(CONF_AUTH_HEADER, default=DEFAULT_AUTH_HEADER): str,
     vol.Optional(CONF_USER_DEVICE_ID, default=DEFAULT_USER_DEVICE_ID): str,
+    vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=DEFAULT_PROFILE_REFRESH_DAYS):
+        vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS)),
 })
 
 
@@ -279,14 +281,14 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
                 vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
         }
 
-        # Energy Profile refresh interval only applies to Smart Port entries.
-        if not is_ac_charger:
-            current_profile_refresh_days = entry.options.get(
-                CONF_PROFILE_REFRESH_DAYS,
-                entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
-            )
-            schema_dict[vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days)] = (
-                vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS))
-            )
+        # Any entry type can own its station's Energy Profile, so every
+        # entry gets the profile list refresh interval.
+        current_profile_refresh_days = entry.options.get(
+            CONF_PROFILE_REFRESH_DAYS,
+            entry.data.get(CONF_PROFILE_REFRESH_DAYS, DEFAULT_PROFILE_REFRESH_DAYS),
+        )
+        schema_dict[vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days)] = (
+            vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS))
+        )
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

@@ -50,7 +50,8 @@
         "data": {
           "base_url": "API base URL (only used if Region = Custom)",
           "auth_header": "Auth header",
-          "user_device_id": "Device ID"
+          "user_device_id": "Device ID",
+          "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
       }
     },

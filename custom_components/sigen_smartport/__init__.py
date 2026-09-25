@@ -163,9 +163,14 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
     """Polls one AC EV charger and hands the result to its sensors."""
 
     def __init__(self, hass: HomeAssistant, client: SigenAcChargerClient, name: str,
-                 update_interval: timedelta, store: Store, saved_grid_power=None):
+                 update_interval: timedelta, store: Store, profile_refresh_seconds: float,
+                 owns_station_profile: bool, saved_grid_power=None):
         super().__init__(hass, _LOGGER, name=f"sigen_ac_charger_{name}", update_interval=update_interval)
         self.client = client
+        self.profile_refresh_seconds = profile_refresh_seconds
+        # Only the station's Energy Profile owner polls it and creates its
+        # entities - see _claim_station_profile.
+        self.owns_station_profile = owns_station_profile
         self._store = store
         self._saved_grid_power = saved_grid_power
 
@@ -185,6 +190,9 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Could not read AC charger status from Sigen cloud")
         await self.async_save_grid_power()
 
+        if self.owns_station_profile:
+            await _async_update_station_profile(self.hass, self.client, self.profile_refresh_seconds)
+
         return {
             "charge_status_code": self.client.charge_status_code,
             "charge_mode": self.client.charge_mode,
@@ -194,6 +202,8 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
             "monthly_energy": self.client.monthly_energy,
             "weekly_energy": self.client.weekly_energy,
             "lifetime_energy": self.client.lifetime_energy,
+            "energy_mode": self.client.current_energy_mode,
+            "energy_profile_id": self.client.current_profile_id,
         }
 
 
@@ -283,9 +293,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.unique_id or entry.entry_id,
             _get_scan_interval(entry),
             ac_store,
+            _get_profile_refresh_seconds(entry),
+            _claim_station_profile(hass, entry),
             saved_grid_power,
         )
-        await ac_coordinator.async_config_entry_first_refresh()
+        try:
+            await ac_coordinator.async_config_entry_first_refresh()
+        except Exception:
+            # Don't sit on the Energy Profile claim while this entry can't load.
+            _release_station_profile(hass, entry)
+            raise
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))

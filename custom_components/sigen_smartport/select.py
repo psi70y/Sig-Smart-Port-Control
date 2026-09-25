@@ -31,7 +31,10 @@ async def async_setup_entry(
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
     if entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER:
-        async_add_entities([SigenAcChargerModeSelector(coordinator, entry)])
+        entities = [SigenAcChargerModeSelector(coordinator, entry)]
+        if coordinator.owns_station_profile:
+            entities.append(SigenEnergyProfileSelector(coordinator, entry))
+        async_add_entities(entities)
         return
     entities = [SigenSmartPortModeSelector(coordinator, entry)]
     if coordinator.owns_station_profile:
