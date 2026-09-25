@@ -33,10 +33,10 @@ async def async_setup_entry(
     if entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER:
         async_add_entities([SigenAcChargerModeSelector(coordinator, entry)])
         return
-    async_add_entities([
-        SigenSmartPortModeSelector(coordinator, entry),
-        SigenEnergyProfileSelector(coordinator, entry),
-    ])
+    entities = [SigenSmartPortModeSelector(coordinator, entry)]
+    if coordinator.owns_station_profile:
+        entities.append(SigenEnergyProfileSelector(coordinator, entry))
+    async_add_entities(entities)
 
 
 class SigenSmartPortModeSelector(CoordinatorEntity, SelectEntity):
@@ -83,10 +83,10 @@ class SigenEnergyProfileSelector(CoordinatorEntity, SelectEntity):
 
     This is a station-wide setting, not specific to a single Smart Port
     load, so it's grouped under its own device keyed by station_id rather
-    than the per-load device the switch/mode selector above use. If the
-    same station has more than one Smart Port load configured, each config
-    entry creates its own entity here, but HA's device registry merges
-    them under the same device since the identifier is the same.
+    than the per-load device the switch/mode selector above use. Only one
+    entry per station creates it (see _claim_station_profile in
+    __init__.py), so several entries on the same station still give a
+    single Energy Profile entity.
     """
 
     _attr_has_entity_name = True

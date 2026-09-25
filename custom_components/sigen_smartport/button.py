@@ -17,7 +17,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([SigenRefreshProfilesButton(coordinator, entry)])
+    # Station-wide, so only the entry that owns the station's Energy
+    # Profile creates it (see _claim_station_profile in __init__.py).
+    if coordinator.owns_station_profile:
+        async_add_entities([SigenRefreshProfilesButton(coordinator, entry)])
 
 
 class SigenRefreshProfilesButton(ButtonEntity):

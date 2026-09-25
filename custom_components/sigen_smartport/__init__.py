@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.storage import Store
@@ -38,6 +38,11 @@ TOKEN_STORAGE_VERSION = 1
 # Bumped only if the persisted AC charger settings file's shape ever changes.
 AC_CHARGER_STORAGE_VERSION = 1
 
+# hass.data key: {station_id: entry_id} of the one entry per station that
+# owns the station-wide Energy Profile select + refresh button (see
+# _claim_station_profile).
+STATION_PROFILE_OWNERS = f"{DOMAIN}_station_profile_owners"
+
 
 def _ac_charger_store(hass: HomeAssistant, entry: ConfigEntry) -> Store:
     """Per-entry file for AC charger values the cloud can't give back to us,
@@ -64,36 +69,87 @@ def _ensure_default_log_level() -> None:
             logger.setLevel(logging.INFO)
 
 
+async def _async_update_station_profile(hass: HomeAssistant, client, profile_refresh_seconds: float) -> None:
+    """Read the station's current Energy Profile, and periodically re-fetch
+    the full list of selectable profiles/modes too.
+
+    Deliberately not fatal to the coordinator if it has trouble - the
+    device's own entities should keep working even if this optional
+    station-level read fails. The list re-fetch is a safety net alongside
+    the manual "Refresh Energy Profiles" button, in case new profiles were
+    created via the mySigen app/web portal - infrequent by default
+    (profile_refresh_seconds, default 30 days) since the list rarely changes.
+    """
+    await hass.async_add_executor_job(client.fetch_current_profile)
+
+    fetched_at = client.profile_options_fetched_at
+    if fetched_at is None or (time.time() - fetched_at) >= profile_refresh_seconds:
+        await hass.async_add_executor_job(client.fetch_profile_options)
+
+
+def _claim_station_profile(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Return True if this entry should own its station's Energy Profile
+    entities, claiming them if nobody else has.
+
+    The Energy Profile is station-wide, so with several entries on the same
+    station (e.g. two Smart Port loads, or a Smart Port load plus an AC
+    charger) only one of them may create the select + button - otherwise HA
+    rejects the duplicates' unique IDs and every entry polls the same
+    profile. The first entry set up claims it; a plain reload keeps its
+    claim. The claim only moves when the owner is removed or disabled (see
+    _release_station_profile), or if the owner no longer exists.
+    """
+    owners = hass.data.setdefault(STATION_PROFILE_OWNERS, {})
+    station_id = str(entry.data[CONF_STATION_ID])
+    owner_id = owners.get(station_id)
+    if owner_id and owner_id != entry.entry_id:
+        owner = hass.config_entries.async_get_entry(owner_id)
+        if owner is not None and owner.disabled_by is None:
+            return False
+    owners[station_id] = entry.entry_id
+    return True
+
+
+def _release_station_profile(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Give up this entry's Energy Profile claim (if it has one) and reload
+    the other loaded entries on the same station so one of them takes over."""
+    owners = hass.data.get(STATION_PROFILE_OWNERS, {})
+    station_id = str(entry.data[CONF_STATION_ID])
+    if owners.get(station_id) != entry.entry_id:
+        return
+    owners.pop(station_id)
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if (other.entry_id != entry.entry_id
+                and str(other.data.get(CONF_STATION_ID)) == station_id
+                and other.state is ConfigEntryState.LOADED):
+            _LOGGER.info(
+                "Sigen Smart Port: handing station %s Energy Profile over to entry '%s'",
+                station_id, other.title,
+            )
+            hass.async_create_task(hass.config_entries.async_reload(other.entry_id))
+
+
 class SigenCoordinator(DataUpdateCoordinator):
     """Polls one Smart Port load (plus its station's energy profile) and
     hands the result to its entities."""
 
     def __init__(self, hass: HomeAssistant, client: SigenSmartLoadClient, name: str,
-                 update_interval: timedelta, profile_refresh_seconds: float):
+                 update_interval: timedelta, profile_refresh_seconds: float,
+                 owns_station_profile: bool):
         super().__init__(hass, _LOGGER, name=f"sigen_smartport_{name}", update_interval=update_interval)
         self.client = client
         self.profile_refresh_seconds = profile_refresh_seconds
+        # Only the station's Energy Profile owner polls it and creates its
+        # entities - see _claim_station_profile.
+        self.owns_station_profile = owns_station_profile
 
     async def _async_update_data(self):
         ok = await self.hass.async_add_executor_job(self.client.refresh)
         if not ok:
             raise UpdateFailed("Could not read status from Sigen cloud")
 
-        # Energy profile is a lightweight extra read alongside the main
-        # Smart Port poll. Deliberately not fatal to the whole coordinator
-        # if it has trouble - the Smart Port switch/select should keep
-        # working even if this optional station-level read fails.
-        await self.hass.async_add_executor_job(self.client.fetch_current_profile)
-
-        # Periodically re-fetch the full list of selectable profiles/modes
-        # too, in case new ones were created via the mySigen app/web portal
-        # since setup or the last refresh. This is a safety net alongside
-        # the manual "Refresh Energy Profiles" button - infrequent by
-        # default (profile_refresh_seconds, default 30 days) since the
-        # list rarely changes.
-        fetched_at = self.client.profile_options_fetched_at
-        if fetched_at is None or (time.time() - fetched_at) >= self.profile_refresh_seconds:
-            await self.hass.async_add_executor_job(self.client.fetch_profile_options)
+        if self.owns_station_profile:
+            await _async_update_station_profile(self.hass, self.client, self.profile_refresh_seconds)
 
         return {
             "control_mode": self.client.control_mode,
@@ -235,9 +291,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
 
-    # Energy profile options (the user's saved profiles + built-in modes)
-    # rarely change, so fetch this once at setup rather than every poll.
-    await hass.async_add_executor_job(client.fetch_profile_options)
+    owns_station_profile = _claim_station_profile(hass, entry)
 
     coordinator = SigenCoordinator(
         hass,
@@ -245,8 +299,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.unique_id or entry.entry_id,
         _get_scan_interval(entry),
         _get_profile_refresh_seconds(entry),
+        owns_station_profile,
     )
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        # The first poll also fetches the Energy Profile option list (the
+        # user's saved profiles + built-in modes) if this entry owns it.
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        # Don't sit on the claim while this entry can't load.
+        _release_station_profile(hass, entry)
+        raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
@@ -294,6 +356,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, _get_platforms(entry))
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Disabling the entry that owns the station's Energy Profile hands
+        # it to another entry on the same station. A plain reload keeps it.
+        if entry.disabled_by is not None:
+            _release_station_profile(hass, entry)
     return unloaded
 
 
@@ -302,5 +368,6 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     (not just unloaded/reloaded)."""
     store: Store = Store(hass, TOKEN_STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_token")
     await store.async_remove()
+    _release_station_profile(hass, entry)
     if _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER:
         await _ac_charger_store(hass, entry).async_remove()
