@@ -1,6 +1,6 @@
 # Sigenergy Smart Port Integration for Home Assistant
 
-A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles).
+A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles), and monitoring and controlling a **Sigenergy AC EV Charger** (see [AC EV Charger](#ac-ev-charger)).
 
 > **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, energy profile control, and a proper HACS + UI setup flow on top of that foundation.
 
@@ -20,6 +20,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
 - **HACS-installable** — add as a HACS custom repository instead of manually copying files.
+- **AC EV Charger support** — read charging status, current and energy totals, and change Charging Mode, Battery Boost, Grid Charging and their limits from HA.
 - **Devices, not loose entities** — the switch and mode selector for each Smart Port load are grouped together as one Device in the HA UI; the Energy Profile selector gets its own Station-level device.
 
 ---
@@ -32,6 +33,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Refresh Energy Profiles button**: manually re-fetch the profile/mode option list on demand — useful right after creating a new custom profile in the mySigen app.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
 - **Configurable Energy Profile list refresh**: how often the full list of selectable profiles/modes is automatically re-checked in the background (default 30 days) — a safety net alongside the manual button.
+- **AC EV Charger** (optional): status, current and energy sensors, plus Charging Mode, Battery Boost and Grid Charging controls — see [AC EV Charger](#ac-ev-charger).
 - **Automatic, restart-safe token management**: tokens (and refresh tokens) persist to disk and renew gently via a refresh grant, entirely behind the scenes — no re-authentication prompts, and no forced logouts of the mySigen app/web portal.
 
 ---
@@ -55,11 +57,12 @@ Copy the `custom_components/sigen_smartport/` folder from this repo into your HA
 
 Once installed, **all setup happens in the UI** — there's no `configuration.yaml` editing.
 
-1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Smart Port"**
-2. You'll be asked for:
+1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Smart Port"**, and pick the device type: **Smart Port Load** or **AC EV Charger** (the charger steps are described in [AC EV Charger](#ac-ev-charger))
+2. For a Smart Port Load you'll be asked for:
    - **Username** — your mySigen account email
    - **Password** — see note below, this is *not* simply your plaintext account password
    - **Station ID** — your 15-digit inverter station ID
+   - **Region** — the Sigen cloud region your account lives in (`aus`, `apac`, `eu`, `cn`, `us`, or `custom` to enter an API base URL yourself in the Advanced step)
    - **Load Path** — leave as `1` unless you have multiple Smart Port loads (see [Multiple Devices](#multiple-devices) below)
    - **Name** — a friendly name for this device
    - **Poll interval** — how often (in seconds) HA checks the cloud for real state; defaults to `300` (5 minutes)
@@ -109,6 +112,46 @@ The list of *selectable* profiles/modes (as opposed to which one is currently ac
 
 - **Automatically**, on the interval set by the Energy Profile refresh setting (default 30 days, configurable at setup or via Configure).
 - **On demand**, via the **"Refresh Energy Profiles"** button on the Station device — press this right after creating a new custom profile in the mySigen app to make it available in HA immediately, without waiting for the automatic check or reloading the integration.
+
+---
+
+## AC EV Charger
+
+If you have a Sigenergy AC EV Charger on the same station, it can be added as its own device. Tested so far with an EVAC 22 on the EU region.
+
+### Adding the charger
+
+1. **Settings → Devices & Services → Add Integration → "Sigenergy Smart Port" → AC EV Charger**
+2. Enter:
+   - **Username / Password** — the same captured values as for a Smart Port load (see [Capturing your credentials](#capturing-your-credentials)). **If you already have a Smart Port entry for the same station, leave both blank** and its credentials are reused, so you don't need to capture them again.
+   - **Station ID** and **Region** — as for a Smart Port load
+   - **Charger Serial Number** — shown in the mySigen app on the charger's Device Info screen
+   - **Name** and **Poll interval**
+3. The **Advanced** step (API base URL, auth header, device ID) works the same as for a Smart Port load.
+
+The charger gets its own login session and its own token file, so it follows the same restart-safe session handling described below.
+
+### Entities
+
+All of these are grouped under one **AC EV Charger** device.
+
+| Entity | Type | What it does |
+|---|---|---|
+| Charge Status Code | Sensor | Raw plug/charge status from the cloud. `0` = not plugged in; other codes are shown as-is (e.g. `3` has been seen while charging) until they are confirmed |
+| Charging Mode | Sensor | Current mode as a label |
+| Charging Current | Sensor (A) | Last set charging current; the charger's maximum current is an attribute |
+| Energy This Week / This Month / Lifetime Energy | Sensor (kWh) | Energy delivered by the charger, usable in the Energy dashboard |
+| Charging Mode | Select | Switch between **Fast Charging** and **PV Surplus Charging**. Sigen AI Mode isn't offered yet; if it's selected in the app, this shows as unknown |
+| Battery Boost | Switch | Let the home battery supply the charger |
+| Battery Boost Cut-Off SOC | Number (%) | Home battery level (5–100 %) below which Battery Boost stops |
+| Grid Charging | Switch | Let the charger draw from the grid |
+| Grid Charging Max Power | Number (kW) | Maximum grid power while Grid Charging is on (0.5–22 kW) |
+
+### Good to know
+
+- **Every change is read back from the cloud.** The Sigen cloud can report success for a change it ignored, so HA always re-reads the charger after a write. The state you see is what the cloud actually applied.
+- **Grid Charging Max Power while Grid Charging is off.** The cloud forces max grid power to 0 whenever Grid Charging is off. While it's off, the number entity shows the value that will be used next time instead, and a value you set then is saved and applied when Grid Charging is switched back on. This value is saved to disk, so it survives Home Assistant restarts. If no earlier value is known at all, 1 kW is used and a warning is logged.
+- **Changes made close together are applied in order.** Several changes at once (for example from one automation) are sent one after another, so they can't overwrite each other.
 
 ---
 
