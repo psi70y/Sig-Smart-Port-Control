@@ -211,7 +211,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if existing:
                     user_input.update(existing)
                 else:
-                    errors["base"] = "cannot_connect"
+                    errors["base"] = "missing_credentials"
             if not errors:
                 self._user_input = user_input
                 self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_AC_CHARGER

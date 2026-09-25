@@ -33,7 +33,7 @@
       },
       "ac_charger": {
         "title": "Connect your AC Charger to Sigen Cloud",
-        "description": "Enter the same username/password you use in the mySigen app, your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info).",
+        "description": "Enter the same username/password you use in the mySigen app, your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info). If this integration already has a Smart Port entry for the same station, you can leave username and password blank to reuse its credentials.",
         "data": {
           "username": "Username (email)",
           "password": "Password",
@@ -55,7 +55,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, region, and (for chargers) the serial number."
+      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, region, and (for chargers) the serial number.",
+      "missing_credentials": "Username and password are required - no existing entry for this station ID was found to reuse them from."
     },
     "abort": {
       "already_configured": "This device is already set up."
