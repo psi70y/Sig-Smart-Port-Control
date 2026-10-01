@@ -1,6 +1,6 @@
 # Sigenergy Smart Port Integration for Home Assistant
 
-A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles), and monitoring and controlling a **Sigenergy AC EV Charger** (see [AC EV Charger](#ac-ev-charger)).
+A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles), starting and stopping **Instant Manual Control** (charge, discharge, hold or self-consume for a set time), and monitoring and controlling a **Sigenergy AC EV Charger** (see [AC EV Charger](#ac-ev-charger)).
 
 > **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, energy profile control, and a proper HACS + UI setup flow on top of that foundation.
 
@@ -20,6 +20,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Configurable poll interval** — defaults to 300 seconds (5 minutes), adjustable at setup or later via the integration's **Configure** button, without needing to remove and re-add the device.
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
 - **HACS-installable** — add as a HACS custom repository instead of manually copying files.
+- **Instant Manual Control** — start Charging, Discharging, Hold Battery or Self-Consumption for 1–1440 minutes, from the UI, a dashboard button or an automation, and see what's running and when it ends. See [Instant Manual Control](#instant-manual-control).
 - **AC EV Charger support** — read charging status, current and energy totals, and change Charging Mode, Battery Boost, Grid Charging and their limits from HA.
 - **Devices, not loose entities** — the switch and mode selector for each Smart Port load are grouped together as one Device in the HA UI; the Energy Profile selector gets its own Station-level device.
 
@@ -30,6 +31,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Power switch**: turn a Smart Port load (e.g. hot water system, pool pump, EV charger) on or off manually, with state that reflects reality.
 - **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
 - **Energy Profile selector**: switch between built-in system modes and your own saved custom profiles, synced with the cloud.
+- **Instant Manual Control**: start or stop the mySigen app's Instant Manual Control, with a status sensor that also shows manual control started from the app, plus actions for automations — see [Instant Manual Control](#instant-manual-control).
 - **Refresh Energy Profiles button**: manually re-fetch the profile/mode option list on demand — useful right after creating a new custom profile in the mySigen app.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
 - **Configurable Energy Profile list refresh**: how often the full list of selectable profiles/modes is automatically re-checked in the background (default 30 days) — a safety net alongside the manual button.
@@ -113,6 +115,163 @@ The list of *selectable* profiles/modes (as opposed to which one is currently ac
 
 - **Automatically**, on the interval set by the Energy Profile refresh setting (default 30 days, configurable at setup or via Configure).
 - **On demand**, via the **"Refresh Energy Profiles"** button on the Station device — press this right after creating a new custom profile in the mySigen app to make it available in HA immediately, without waiting for the automatic check or reloading the integration.
+
+---
+
+## Instant Manual Control
+
+The same feature as **Instant Manual Control** in the mySigen app: tell the battery to do one thing for a set time, then go back to your Energy Profile automatically.
+
+| Action | What the battery does | Power limit |
+|---|---|---|
+| Charging | Charges the battery | Optional |
+| Discharging | Discharges | Optional |
+| Hold Battery | Neither charges nor discharges | Not used |
+| Self-Consumption | Runs in self-consumption mode | Not used |
+
+Your Energy Profile isn't changed. Manual control runs on top of it, and the profile takes over again when the time is up or you stop it.
+
+### Entities
+
+These are added to the **Sigen Station** device, next to the Energy Profile select. Like the Energy Profile, there's only one set per station, however many entries you have for it.
+
+| Entity | Type | What it does |
+|---|---|---|
+| Manual Control Action | Select | Charging, Discharging, Hold Battery or Self-Consumption |
+| Manual Control Duration | Number (min) | How long to run, 1–1440 minutes (24 hours). Default 30 |
+| Manual Control Power Limit | Number (kW) | Maximum charge or discharge power, 0–30 kW. **0 means no limit.** Only used for Charging and Discharging |
+| Start Manual Control | Button | Starts manual control with the three settings above |
+| Stop Manual Control | Button | Ends manual control now |
+| Manual Control | Sensor | `Off`, or the action that's running. The raw mode code is in the `mode_code` attribute |
+| Manual Control Ends | Sensor (timestamp) | When the running manual control ends (shown as e.g. "in 23 minutes"). Unknown while it's off |
+
+- **Action, Duration and Power Limit are settings for the next start.** Changing them sends nothing to Sigenergy. Press **Start Manual Control** to send them.
+- **These settings are saved to disk** and survive Home Assistant restarts. Sigenergy doesn't give them back, so the integration keeps its own copy.
+- **The two sensors read the real state from Sigenergy**, so manual control started or stopped in the mySigen app shows up too, at the next poll.
+- **It changes to Off when the time is up.** Shortly after the end time, the integration checks again so the sensors update, instead of waiting for the next regular poll.
+
+### Actions for automations
+
+Two actions let an automation or script start and stop manual control in one step, without touching the settings entities:
+
+```yaml
+action: sigen_smartport.start_manual_control
+target:
+  device_id: <your Sigen Station device>
+data:
+  action: charging        # charging, discharging, hold_battery or self_consumption
+  duration: 120           # minutes, 1-1440 (optional, default 30)
+  power_limit: 5.0        # kW (optional - leave out or use 0 for no limit)
+```
+
+```yaml
+action: sigen_smartport.stop_manual_control
+target:
+  device_id: <your Sigen Station device>
+```
+
+The target can be the Sigen Station device or any entity on it, for example `sensor.sigen_station_1234567890_manual_control`. In the automation editor, search for **"Start manual control"** and pick the device from the list.
+
+Example: charge from the grid for two hours whenever the price goes negative.
+
+```yaml
+alias: Charge battery when the price is negative
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.your_electricity_price
+    below: 0
+actions:
+  - action: sigen_smartport.start_manual_control
+    target:
+      entity_id: sensor.sigen_station_1234567890_manual_control
+    data:
+      action: charging
+      duration: 120
+```
+
+### Dashboard card
+
+The integration doesn't add dashboard cards itself, but here's a card with one-tap buttons, like the presets in the app. Add a **Manual** card to a dashboard, paste this in, and replace `1234567890` with your station ID:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    title: Battery manual control
+    entities:
+      - entity: sensor.sigen_station_1234567890_manual_control
+        name: Status
+      - entity: sensor.sigen_station_1234567890_manual_control_ends
+        name: Ends
+  - type: grid
+    columns: 4
+    square: false
+    cards:
+      - type: button
+        name: Charge 1 h
+        icon: mdi:battery-charging
+        tap_action:
+          action: perform-action
+          perform_action: sigen_smartport.start_manual_control
+          target:
+            entity_id: sensor.sigen_station_1234567890_manual_control
+          data:
+            action: charging
+            duration: 60
+      - type: button
+        name: Discharge 30 min
+        icon: mdi:battery-arrow-down
+        tap_action:
+          action: perform-action
+          perform_action: sigen_smartport.start_manual_control
+          target:
+            entity_id: sensor.sigen_station_1234567890_manual_control
+          data:
+            action: discharging
+            duration: 30
+      - type: button
+        name: Hold 2 h
+        icon: mdi:battery-lock
+        tap_action:
+          action: perform-action
+          perform_action: sigen_smartport.start_manual_control
+          target:
+            entity_id: sensor.sigen_station_1234567890_manual_control
+          data:
+            action: hold_battery
+            duration: 120
+      - type: button
+        name: Stop
+        icon: mdi:stop
+        tap_action:
+          action: perform-action
+          perform_action: sigen_smartport.stop_manual_control
+          target:
+            entity_id: sensor.sigen_station_1234567890_manual_control
+          confirmation:
+            text: Stop manual control and go back to the Energy Profile?
+```
+
+For full control with your own action, duration and power limit, use an Entities card with the five control entities instead:
+
+```yaml
+type: entities
+title: Manual control settings
+entities:
+  - select.sigen_station_1234567890_manual_control_action
+  - number.sigen_station_1234567890_manual_control_duration
+  - number.sigen_station_1234567890_manual_control_power_limit
+  - button.sigen_station_1234567890_start_manual_control
+  - button.sigen_station_1234567890_stop_manual_control
+```
+
+`perform-action` needs Home Assistant 2024.8 or later. On older versions, use `action: call-service` and `service:` instead.
+
+### Good to know
+
+- **Charging with no power limit can draw a lot from the grid.** Set a power limit if that matters for your tariff or connection.
+- **Starting while manual control is already running** sends the new settings straight away. What Sigenergy does then hasn't been tested yet; stopping first is the safe option.
+- **If Sigenergy rejects a start or stop**, Home Assistant shows an error and the details are logged.
 
 ---
 
