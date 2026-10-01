@@ -12,7 +12,7 @@ CONF_DEVICE_KIND = "device_kind"
 DEVICE_KIND_SMART_PORT = "smart_port"
 DEVICE_KIND_AC_CHARGER = "ac_charger"
 
-PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON]
+PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON, Platform.SENSOR, Platform.NUMBER]
 PLATFORMS_AC_CHARGER = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER, Platform.BUTTON]
 
 CONF_STATION_ID = "station_id"
@@ -92,3 +92,42 @@ AC_MAX_GRID_POWER_KW = 22.0
 # the cloud answers success but leaves it off), and turning it off forces
 # max power to 0. This is used if no earlier non-zero value is known.
 AC_FALLBACK_GRID_POWER_KW = 1.0
+
+# Instant Manual Control - confirmed by network capture of the mySigen web
+# app (PUT/GET /device/energy-profile/instant/manunal). Overrides the
+# station's Energy Profile for a set time, then the profile resumes.
+MANUAL_ACTION_CHARGING = "Charging"
+MANUAL_ACTION_DISCHARGING = "Discharging"
+MANUAL_ACTION_HOLD = "Hold Battery"
+MANUAL_ACTION_SELF_CONSUMPTION = "Self-Consumption"
+# Label -> the "mode" string the cloud expects.
+MANUAL_ACTION_MODES = {
+    MANUAL_ACTION_CHARGING: "0",
+    MANUAL_ACTION_DISCHARGING: "1",
+    MANUAL_ACTION_HOLD: "2",
+    MANUAL_ACTION_SELF_CONSUMPTION: "3",
+}
+MANUAL_ACTION_LABELS = {mode: label for label, mode in MANUAL_ACTION_MODES.items()}
+# Keys used by the start_manual_control action (lower-case, YAML-friendly).
+MANUAL_ACTION_KEYS = {
+    "charging": MANUAL_ACTION_CHARGING,
+    "discharging": MANUAL_ACTION_DISCHARGING,
+    "hold_battery": MANUAL_ACTION_HOLD,
+    "self_consumption": MANUAL_ACTION_SELF_CONSUMPTION,
+}
+# Only these send a power limit; the others send "" like the app does.
+MANUAL_ACTIONS_WITH_POWER_LIMIT = (MANUAL_ACTION_CHARGING, MANUAL_ACTION_DISCHARGING)
+MANUAL_STATE_OFF = "Off"
+
+# The app only accepts 1-1440 minutes (24 hours).
+MANUAL_DURATION_MIN = 1
+MANUAL_DURATION_MAX = 1440
+MANUAL_DURATION_DEFAULT = 30
+# 0 means no limit. The cloud's "no limit" value is the 32-bit max / 1000,
+# the same one Energy Profile settings use for uncapped powers.
+MANUAL_POWER_LIMIT_MIN = 0.0
+MANUAL_POWER_LIMIT_MAX = 30.0
+MANUAL_POWER_LIMIT_NONE = "4294967.295"
+
+SERVICE_START_MANUAL_CONTROL = "start_manual_control"
+SERVICE_STOP_MANUAL_CONTROL = "stop_manual_control"

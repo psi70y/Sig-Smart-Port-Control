@@ -1,0 +1,44 @@
+start_manual_control:
+  target:
+    device:
+      integration: sigen_smartport
+      model: Energy Storage System
+  fields:
+    action:
+      required: true
+      example: charging
+      selector:
+        select:
+          translation_key: manual_action
+          options:
+            - charging
+            - discharging
+            - hold_battery
+            - self_consumption
+    duration:
+      required: false
+      default: 30
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          unit_of_measurement: min
+          mode: box
+    power_limit:
+      required: false
+      example: 5.0
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 0.1
+          unit_of_measurement: kW
+          mode: box
+
+stop_manual_control:
+  target:
+    device:
+      integration: sigen_smartport
+      model: Energy Storage System

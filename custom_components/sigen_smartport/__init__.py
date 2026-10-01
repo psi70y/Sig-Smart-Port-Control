@@ -4,11 +4,20 @@ import logging
 import time
 from datetime import datetime, timedelta
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, CONF_USERNAME, CONF_PASSWORD
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -28,6 +37,20 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
     DEFAULT_BASE_URL,
+    MANUAL_ACTION_KEYS,
+    MANUAL_DURATION_DEFAULT,
+    MANUAL_DURATION_MAX,
+    MANUAL_DURATION_MIN,
+    MANUAL_POWER_LIMIT_MAX,
+    MANUAL_POWER_LIMIT_MIN,
+    SERVICE_START_MANUAL_CONTROL,
+    SERVICE_STOP_MANUAL_CONTROL,
+)
+from .manual_control import (
+    ManualControlSettings,
+    async_start_manual_control,
+    async_stop_manual_control,
+    manual_control_store,
 )
 from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
 
@@ -42,6 +65,27 @@ AC_CHARGER_STORAGE_VERSION = 1
 # owns the station-wide Energy Profile select + refresh button (see
 # _claim_station_profile).
 STATION_PROFILE_OWNERS = f"{DOMAIN}_station_profile_owners"
+
+# Refresh this long after Instant Manual Control's end time, so its sensors
+# show it ended without waiting for the next regular poll. The small delay
+# gives the cloud time to report it as finished.
+MANUAL_END_REFRESH_DELAY_SECONDS = 20
+
+# Setup is UI-only (config entries); async_setup exists just to register
+# the integration's actions.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+START_MANUAL_CONTROL_SCHEMA = vol.Schema({
+    **cv.TARGET_SERVICE_FIELDS,
+    vol.Required("action"): vol.In(list(MANUAL_ACTION_KEYS)),
+    vol.Optional("duration", default=MANUAL_DURATION_DEFAULT): vol.All(
+        vol.Coerce(int), vol.Range(min=MANUAL_DURATION_MIN, max=MANUAL_DURATION_MAX)
+    ),
+    vol.Optional("power_limit"): vol.All(
+        vol.Coerce(float), vol.Range(min=MANUAL_POWER_LIMIT_MIN, max=MANUAL_POWER_LIMIT_MAX)
+    ),
+})
+STOP_MANUAL_CONTROL_SCHEMA = vol.Schema({**cv.TARGET_SERVICE_FIELDS})
 
 
 def _ac_charger_store(hass: HomeAssistant, entry: ConfigEntry) -> Store:
@@ -81,6 +125,7 @@ async def _async_update_station_profile(hass: HomeAssistant, client, profile_ref
     (profile_refresh_seconds, default 30 days) since the list rarely changes.
     """
     await hass.async_add_executor_job(client.fetch_current_profile)
+    await hass.async_add_executor_job(client.fetch_manual_control)
 
     fetched_at = client.profile_options_fetched_at
     if fetched_at is None or (time.time() - fetched_at) >= profile_refresh_seconds:
@@ -129,7 +174,63 @@ def _release_station_profile(hass: HomeAssistant, entry: ConfigEntry) -> None:
             hass.async_create_task(hass.config_entries.async_reload(other.entry_id))
 
 
-class SigenCoordinator(DataUpdateCoordinator):
+class _StationCoordinatorMixin:
+    """Instant Manual Control handling shared by both coordinator types.
+    Only used by the entry that owns the station's Energy Profile."""
+
+    # ManualControlSettings for the owning entry, None otherwise.
+    manual_settings = None
+    _manual_end_unsub = None
+
+    def _manual_control_data(self) -> dict:
+        return {
+            "manual_enabled": self.client.manual_enabled,
+            "manual_mode": self.client.manual_mode,
+            "manual_end_time": self.client.manual_end_time,
+        }
+
+    @callback
+    def _schedule_manual_end_refresh(self) -> None:
+        """Refresh just after manual control's end time (see
+        MANUAL_END_REFRESH_DELAY_SECONDS)."""
+        self.cancel_manual_end_refresh()
+        end_time = self.client.manual_end_time
+        if not self.client.manual_enabled or not end_time:
+            return
+        when = end_time + MANUAL_END_REFRESH_DELAY_SECONDS
+        if when <= time.time():
+            # Already past - the next regular poll picks it up.
+            return
+        self._manual_end_unsub = async_track_point_in_utc_time(
+            self.hass, self._async_manual_end_reached, dt_util.utc_from_timestamp(when)
+        )
+        _LOGGER.debug(
+            "Sigen Smart Port: will re-check manual control at %s",
+            datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+    async def _async_manual_end_reached(self, _now) -> None:
+        self._manual_end_unsub = None
+        _LOGGER.debug("Sigen Smart Port: manual control end time reached, refreshing")
+        await self.async_request_refresh()
+
+    async def async_manual_control_sent(self) -> None:
+        """After a start/stop, show the new state straight away from what
+        was sent, then refresh to pick up the cloud's own end time. The
+        refresh alone can lag up to 10s, since HA spaces out back-to-back
+        refresh requests (e.g. Stop pressed right after Start)."""
+        self.async_set_updated_data({**self.data, **self._manual_control_data()})
+        self._schedule_manual_end_refresh()
+        await self.async_request_refresh()
+
+    @callback
+    def cancel_manual_end_refresh(self) -> None:
+        if self._manual_end_unsub:
+            self._manual_end_unsub()
+            self._manual_end_unsub = None
+
+
+class SigenCoordinator(_StationCoordinatorMixin, DataUpdateCoordinator):
     """Polls one Smart Port load (plus its station's energy profile) and
     hands the result to its entities."""
 
@@ -150,16 +251,18 @@ class SigenCoordinator(DataUpdateCoordinator):
 
         if self.owns_station_profile:
             await _async_update_station_profile(self.hass, self.client, self.profile_refresh_seconds)
+            self._schedule_manual_end_refresh()
 
         return {
             "control_mode": self.client.control_mode,
             "manual_switch": self.client.manual_switch,
             "energy_mode": self.client.current_energy_mode,
             "energy_profile_id": self.client.current_profile_id,
+            **self._manual_control_data(),
         }
 
 
-class SigenAcChargerCoordinator(DataUpdateCoordinator):
+class SigenAcChargerCoordinator(_StationCoordinatorMixin, DataUpdateCoordinator):
     """Polls one AC EV charger and hands the result to its sensors."""
 
     def __init__(self, hass: HomeAssistant, client: SigenAcChargerClient, name: str,
@@ -192,6 +295,7 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
 
         if self.owns_station_profile:
             await _async_update_station_profile(self.hass, self.client, self.profile_refresh_seconds)
+            self._schedule_manual_end_refresh()
 
         return {
             "charge_status_code": self.client.charge_status_code,
@@ -204,6 +308,7 @@ class SigenAcChargerCoordinator(DataUpdateCoordinator):
             "lifetime_energy": self.client.lifetime_energy,
             "energy_mode": self.client.current_energy_mode,
             "energy_profile_id": self.client.current_profile_id,
+            **self._manual_control_data(),
         }
 
 
@@ -217,6 +322,81 @@ def _get_platforms(entry: ConfigEntry) -> list:
     if _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER:
         return PLATFORMS_AC_CHARGER
     return PLATFORMS_SMART_PORT
+
+
+def _coordinators_for_call(hass: HomeAssistant, call: ServiceCall) -> list:
+    """Find the station coordinators an action call targets. Accepts Sigen
+    Station devices, or any entity on one."""
+    device_ids = set(call.data.get(ATTR_DEVICE_ID) or [])
+    entity_ids = call.data.get(ATTR_ENTITY_ID) or []
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
+    ent_reg = er.async_get(hass)
+    for entity_id in entity_ids:
+        ent = ent_reg.async_get(entity_id)
+        if ent and ent.device_id:
+            device_ids.add(ent.device_id)
+    if not device_ids:
+        raise ServiceValidationError("Choose a Sigen Station device as the target")
+
+    dev_reg = dr.async_get(hass)
+    coordinators = []
+    for device_id in device_ids:
+        device = dev_reg.async_get(device_id)
+        station_id = None
+        for domain, identifier in (device.identifiers if device else ()):
+            if domain == DOMAIN and identifier.startswith("station_"):
+                station_id = identifier[len("station_"):]
+        if station_id is None:
+            raise ServiceValidationError(
+                f"'{device.name if device else device_id}' is not a Sigen Station device"
+            )
+        coordinator = next(
+            (c for c in hass.data.get(DOMAIN, {}).values()
+             if c.owns_station_profile and c.client.station_id == station_id),
+            None,
+        )
+        if coordinator is None:
+            raise ServiceValidationError(f"Sigen Station {station_id} is not loaded")
+        coordinators.append(coordinator)
+    return coordinators
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the Instant Manual Control actions."""
+
+    async def _async_start(call: ServiceCall) -> None:
+        for coordinator in _coordinators_for_call(hass, call):
+            await async_start_manual_control(
+                hass,
+                coordinator,
+                MANUAL_ACTION_KEYS[call.data["action"]],
+                call.data["duration"],
+                call.data.get("power_limit"),
+            )
+
+    async def _async_stop(call: ServiceCall) -> None:
+        for coordinator in _coordinators_for_call(hass, call):
+            await async_stop_manual_control(hass, coordinator)
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_START_MANUAL_CONTROL, _async_start, schema=START_MANUAL_CONTROL_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_STOP_MANUAL_CONTROL, _async_stop, schema=STOP_MANUAL_CONTROL_SCHEMA
+    )
+    return True
+
+
+async def _async_setup_manual_control(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
+    """Give the station owner its saved manual control settings, and stop
+    the end-time refresh timer when the entry unloads."""
+    entry.async_on_unload(coordinator.cancel_manual_end_refresh)
+    if not coordinator.owns_station_profile:
+        return
+    settings = ManualControlSettings(hass, entry.data[CONF_STATION_ID])
+    await settings.async_load()
+    coordinator.manual_settings = settings
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -304,6 +484,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _release_station_profile(hass, entry)
             raise
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
+        await _async_setup_manual_control(hass, entry, ac_coordinator)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
@@ -328,6 +509,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    await _async_setup_manual_control(hass, entry, coordinator)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_SMART_PORT)
 
@@ -388,3 +570,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     _release_station_profile(hass, entry)
     if _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER:
         await _ac_charger_store(hass, entry).async_remove()
+    # Manual control settings are per station - only remove them with the
+    # station's last entry.
+    station_id = str(entry.data[CONF_STATION_ID])
+    if not any(
+        other.entry_id != entry.entry_id and str(other.data.get(CONF_STATION_ID)) == station_id
+        for other in hass.config_entries.async_entries(DOMAIN)
+    ):
+        await manual_control_store(hass, station_id).async_remove()

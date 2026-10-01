@@ -19,7 +19,9 @@ from .const import (
     MODE_MANUAL,
     AC_CHARGE_MODE_VALUES,
     AC_CHARGE_MODE_LABELS,
+    MANUAL_ACTION_MODES,
 )
+from .entity import SigenManualControlSettingEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,13 +34,11 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
     if entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER:
         entities = [SigenAcChargerModeSelector(coordinator, entry)]
-        if coordinator.owns_station_profile:
-            entities.append(SigenEnergyProfileSelector(coordinator, entry))
-        async_add_entities(entities)
-        return
-    entities = [SigenSmartPortModeSelector(coordinator, entry)]
+    else:
+        entities = [SigenSmartPortModeSelector(coordinator, entry)]
     if coordinator.owns_station_profile:
         entities.append(SigenEnergyProfileSelector(coordinator, entry))
+        entities.append(SigenManualControlActionSelector(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -191,3 +191,24 @@ class SigenAcChargerModeSelector(CoordinatorEntity, SelectEntity):
         if ok:
             _LOGGER.info("Changed Sigen AC charger charging mode to: %s", option)
         await self.coordinator.async_request_refresh()
+
+
+class SigenManualControlActionSelector(SigenManualControlSettingEntity, SelectEntity):
+    """Which Instant Manual Control action the Start button uses. Changing
+    it sends nothing to the cloud by itself."""
+
+    _attr_name = "Manual Control Action"
+    _attr_icon = "mdi:battery-sync"
+    _attr_options = list(MANUAL_ACTION_MODES)
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator, entry, "manual_control_action")
+
+    @property
+    def current_option(self) -> str:
+        return self._settings.action
+
+    async def async_select_option(self, option: str) -> None:
+        await self._settings.async_set(action=option)
+        self.async_write_ha_state()
+        _LOGGER.info("Sigen Smart Port: manual control action set to %s (used on next start)", option)

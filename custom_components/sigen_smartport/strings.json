@@ -87,6 +87,38 @@
         "us": "United States / Latin America",
         "custom": "Custom (enter API base URL manually)"
       }
+    },
+    "manual_action": {
+      "options": {
+        "charging": "Charging",
+        "discharging": "Discharging",
+        "hold_battery": "Hold Battery",
+        "self_consumption": "Self-Consumption"
+      }
+    }
+  },
+  "services": {
+    "start_manual_control": {
+      "name": "Start manual control",
+      "description": "Starts Sigenergy Instant Manual Control on a Sigen Station for a set time. When the time is up, the station goes back to its Energy Profile.",
+      "fields": {
+        "action": {
+          "name": "Action",
+          "description": "What the battery should do."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long to run, in minutes (1-1440). Defaults to 30."
+        },
+        "power_limit": {
+          "name": "Power limit",
+          "description": "Maximum charge or discharge power in kW. Only used for Charging and Discharging. Leave empty or set 0 for no limit."
+        }
+      }
+    },
+    "stop_manual_control": {
+      "name": "Stop manual control",
+      "description": "Ends Sigenergy Instant Manual Control now. The station goes back to its Energy Profile."
     }
   }
 }

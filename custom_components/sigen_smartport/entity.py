@@ -1,4 +1,5 @@
-"""Shared base for AC charger entities that read the charge-mode settings."""
+"""Shared entity bases: AC charger entities that read the charge-mode
+settings, and the station-wide Instant Manual Control entities."""
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity import DeviceInfo
@@ -39,3 +40,33 @@ class SigenAcChargerEntity(CoordinatorEntity):
         await self.hass.async_add_executor_job(lambda: client.set_charge_settings(**changes))
         # Always read back - the cloud reports success even for ignored writes.
         await self.coordinator.async_request_refresh()
+
+
+def station_device_info(station_id) -> DeviceInfo:
+    """The station-wide "Sigen Station" device the Energy Profile select
+    and the manual control entities live on."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"station_{station_id}")},
+        name=f"Sigen Station {station_id}",
+        manufacturer="Sigenergy",
+        model="Energy Storage System",
+    )
+
+
+class SigenManualControlSettingEntity:
+    """Base for the Action / Duration / Power Limit entities. They hold
+    settings for the next Start (saved to disk by ManualControlSettings),
+    not cloud state, so they don't follow the coordinator."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str):
+        self.coordinator = coordinator
+        station_id = entry.data[CONF_STATION_ID]
+        self._attr_unique_id = f"{station_id}_{unique_suffix}"
+        self._attr_device_info = station_device_info(station_id)
+
+    @property
+    def _settings(self):
+        return self.coordinator.manual_settings
