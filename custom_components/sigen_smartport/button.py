@@ -1,4 +1,4 @@
-"""Button platform for Sigenergy Smart Port - manual energy profile list
+"""Button platform for Sigenergy Cloud Control - manual energy profile list
 refresh, and Instant Manual Control start/stop."""
 
 import logging
@@ -60,7 +60,7 @@ class SigenRefreshProfilesButton(ButtonEntity):
         ok = await self.hass.async_add_executor_job(client.fetch_profile_options)
         if ok:
             _LOGGER.info(
-                "Sigen Smart Port: manually refreshed energy profile list (%d options found)",
+                "Sigenergy Cloud Control: manually refreshed energy profile list (%d options found)",
                 len(client.profile_options),
             )
             # Also refresh current state so a just-created profile's active
@@ -68,7 +68,7 @@ class SigenRefreshProfilesButton(ButtonEntity):
             # too, not just its availability as an option.
             await self.coordinator.async_request_refresh()
         else:
-            _LOGGER.error("Sigen Smart Port: manual energy profile list refresh failed")
+            _LOGGER.error("Sigenergy Cloud Control: manual energy profile list refresh failed")
 
 
 class _SigenManualControlButton(ButtonEntity):

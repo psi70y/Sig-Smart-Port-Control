@@ -109,7 +109,7 @@ class _SigenBaseClient:
             self._token_expiry = expiry_epoch
             expiry_str = datetime.fromtimestamp(expiry_epoch).strftime("%Y-%m-%d %H:%M:%S")
             _LOGGER.info(
-                "Sigen Smart Port: reused cached auth token from disk (valid until %s) - no fresh login needed",
+                "Sigenergy Cloud Control: reused cached auth token from disk (valid until %s) - no fresh login needed",
                 expiry_str,
             )
         # The refresh_token is restored independently of whether the access
@@ -181,7 +181,7 @@ class _SigenBaseClient:
                     if token:
                         expiry_str = datetime.fromtimestamp(self._token_expiry).strftime("%Y-%m-%d %H:%M:%S")
                         _LOGGER.info(
-                            "Sigen Smart Port: renewed session via refresh token (valid until %s)",
+                            "Sigenergy Cloud Control: renewed session via refresh token (valid until %s)",
                             expiry_str,
                         )
                         return token
@@ -210,7 +210,7 @@ class _SigenBaseClient:
                     if token:
                         expiry_str = datetime.fromtimestamp(self._token_expiry).strftime("%Y-%m-%d %H:%M:%S")
                         _LOGGER.info(
-                            "Sigen Smart Port: logged in with a fresh password-grant token (valid until %s)",
+                            "Sigenergy Cloud Control: logged in with a fresh password-grant token (valid until %s)",
                             expiry_str,
                         )
                         return token
@@ -389,13 +389,13 @@ class _SigenBaseClient:
                 end_str = (datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
                            if end_time else "unknown")
                 _LOGGER.info(
-                    "Sigen Smart Port: Instant Manual Control is %s - %s until %s",
+                    "Sigenergy Cloud Control: Instant Manual Control is %s - %s until %s",
                     "active" if first_read else "now active",
                     _MANUAL_MODE_NAMES.get(mode, f"mode {mode}"), end_str,
                 )
             elif not first_read:
                 _LOGGER.info(
-                    "Sigen Smart Port: Instant Manual Control has ended - station is back on its Energy Profile"
+                    "Sigenergy Cloud Control: Instant Manual Control has ended - station is back on its Energy Profile"
                 )
 
         self.manual_enabled = enabled

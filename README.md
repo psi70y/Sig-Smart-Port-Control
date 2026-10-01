@@ -1,6 +1,13 @@
-# Sigenergy Smart Port Integration for Home Assistant
+# Sigenergy Cloud Control for Home Assistant
 
-A custom Home Assistant integration that provides full two-way control of your **Sigenergy Smart Port** — toggle manual load switching, switch between Manual and Auto (Sig Schedule) modes, and see the *real* state reflected in HA, not just whatever was last written. Also supports reading and switching your system's overall **Energy Profile** (built-in modes and your own saved custom profiles), starting and stopping **Instant Manual Control** (charge, discharge, hold or self-consume for a set time), and monitoring and controlling a **Sigenergy AC EV Charger** (see [AC EV Charger](#ac-ev-charger)).
+A custom Home Assistant integration that controls your Sigenergy system through Sigenergy's cloud, using the same API as the mySigen app. It gives full two-way control, and shows the *real* state in HA, not just whatever was last written:
+
+- **Smart Port loads**: switch them on and off, and between Manual and Auto (Sig Schedule)
+- **Energy Profile**: read and switch your system's overall profile (built-in modes and your own saved custom profiles)
+- **Instant Manual Control**: charge, discharge, hold or self-consume for a set time (see [Instant Manual Control](#instant-manual-control))
+- **Sigenergy AC EV Charger**: monitor it and change its charging settings (see [AC EV Charger](#ac-ev-charger))
+
+> **Formerly "Sigenergy Smart Port".** It was renamed in version 2.9.0 because it now does much more than control Smart Ports. Nothing changes for existing installs: it's the same HACS repository, and your devices, entity IDs and automations stay as they are.
 
 > **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, energy profile control, and a proper HACS + UI setup flow on top of that foundation.
 
@@ -46,7 +53,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 
 1. In HA: **HACS → ⋮ (top right) → Custom repositories**
 2. Add this repository's URL, category **Integration**
-3. Find "Sigenergy Smart Port" in HACS and install it
+3. Find "Sigenergy Cloud Control" in HACS and install it
 4. Restart Home Assistant
 
 ### Option B — Manual
@@ -59,7 +66,7 @@ Copy the `custom_components/sigen_smartport/` folder from this repo into your HA
 
 Once installed, **all setup happens in the UI** — there's no `configuration.yaml` editing.
 
-1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Smart Port"**, and pick the device type: **Smart Port Load** or **AC EV Charger** (the charger steps are described in [AC EV Charger](#ac-ev-charger))
+1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Cloud Control"**, and pick the device type: **Smart Port Load** or **AC EV Charger** (the charger steps are described in [AC EV Charger](#ac-ev-charger))
 2. For a Smart Port Load you'll be asked for:
    - **Username** — your mySigen account email
    - **Password** — see note below, this is *not* simply your plaintext account password
@@ -71,7 +78,7 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
 3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID, and how often the full Energy Profile list is auto-refreshed — default `30` days) — only change these if you know you need to.
 4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
 
-The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Smart Port → Configure**, without needing to remove and re-add the device.
+The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Cloud Control → Configure**, without needing to remove and re-add the device.
 
 ### Capturing your credentials
 
@@ -95,7 +102,7 @@ Because this talks to private app endpoints, you need to capture a few values fr
 - **A full password login only happens** on first-ever setup, or as a fallback if a refresh token is ever rejected outright (e.g. after an extended period offline).
 - **There's no explicit logout call.** Tokens are simply left to expire naturally rather than being proactively revoked.
 
-If the mySigen app or web portal gets logged out unexpectedly, please open an issue with your Home Assistant logs (filter for "Sigen Smart Port") covering that period — the integration logs every login and refresh event at `info` level to help diagnose it.
+If the mySigen app or web portal gets logged out unexpectedly, please open an issue with your Home Assistant logs (filter for "Sigenergy Cloud Control", or "Sigen Smart Port" on versions before 2.9.0) covering that period — the integration logs every login and refresh event at `info` level to help diagnose it.
 
 ---
 
@@ -281,7 +288,7 @@ If you have a Sigenergy AC EV Charger on the same station, it can be added as it
 
 ### Adding the charger
 
-1. **Settings → Devices & Services → Add Integration → "Sigenergy Smart Port" → AC EV Charger**
+1. **Settings → Devices & Services → Add Integration → "Sigenergy Cloud Control" → AC EV Charger**
 2. Enter:
    - **Username / Password** — the same captured values as for a Smart Port load (see [Capturing your credentials](#capturing-your-credentials)). **If you already have a Smart Port entry for the same station, leave both blank** and its credentials are reused, so you don't need to capture them again.
    - **Station ID** and **Region** — as for a Smart Port load

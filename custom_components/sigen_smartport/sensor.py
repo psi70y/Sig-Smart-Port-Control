@@ -214,7 +214,7 @@ class SigenManualControlStatusSensor(_SigenManualControlSensorBase):
         if label is None:
             # A mode the app didn't offer when this was written - show it
             # as unknown rather than guessing; the raw code is an attribute.
-            _LOGGER.debug("Sigen Smart Port: unrecognised manual control mode %r", mode)
+            _LOGGER.debug("Sigenergy Cloud Control: unrecognised manual control mode %r", mode)
         return label
 
     @property

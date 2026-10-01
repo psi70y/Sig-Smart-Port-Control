@@ -65,7 +65,7 @@ class ManualControlSettings:
         except (TypeError, ValueError):
             pass
         _LOGGER.info(
-            "Sigen Smart Port: restored manual control settings from disk (%s, %d min, %s)",
+            "Sigenergy Cloud Control: restored manual control settings from disk (%s, %d min, %s)",
             self.action, self.duration, describe_power_limit(self.action, self.power_limit),
         )
 
@@ -78,7 +78,7 @@ class ManualControlSettings:
             "duration": self.duration,
             "power_limit": self.power_limit,
         })
-        _LOGGER.debug("Sigen Smart Port: saved manual control settings to disk: %s", changes)
+        _LOGGER.debug("Sigenergy Cloud Control: saved manual control settings to disk: %s", changes)
 
 
 def _clamp(value, low, high):
@@ -126,7 +126,7 @@ async def async_start_manual_control(hass: HomeAssistant, coordinator, action: s
         running = MANUAL_ACTION_LABELS.get(client.manual_mode, "Manual control")
         end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
         _LOGGER.warning(
-            "Sigen Smart Port: not starting %s - %s is already running until %s. Stop it first",
+            "Sigenergy Cloud Control: not starting %s - %s is already running until %s. Stop it first",
             action, running, end_str,
         )
         raise ServiceValidationError(
@@ -141,7 +141,7 @@ async def async_start_manual_control(hass: HomeAssistant, coordinator, action: s
 
     end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
     _LOGGER.info(
-        "Sigen Smart Port: started Instant Manual Control - %s for %d min, %s (until about %s)",
+        "Sigenergy Cloud Control: started Instant Manual Control - %s for %d min, %s (until about %s)",
         action, duration, describe_power_limit(action, power_limit), end_str,
     )
     await coordinator.async_manual_control_sent()
@@ -152,5 +152,5 @@ async def async_stop_manual_control(hass: HomeAssistant, coordinator) -> None:
     ok = await hass.async_add_executor_job(client.stop_manual_control)
     if not ok:
         raise HomeAssistantError("Sigen cloud rejected the manual control stop - see the log for details")
-    _LOGGER.info("Sigen Smart Port: stopped Instant Manual Control - station is back on its Energy Profile")
+    _LOGGER.info("Sigenergy Cloud Control: stopped Instant Manual Control - station is back on its Energy Profile")
     await coordinator.async_manual_control_sent()

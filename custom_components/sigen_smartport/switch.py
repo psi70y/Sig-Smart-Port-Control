@@ -1,4 +1,4 @@
-"""Switch platform for Sigenergy Smart Port / AC Charger - config-entry based."""
+"""Switch platform for Sigenergy Cloud Control (Smart Port loads / AC Charger) - config-entry based."""
 
 import logging
 

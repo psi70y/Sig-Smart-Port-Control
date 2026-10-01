@@ -1,4 +1,4 @@
-"""Constants for the Sigenergy Smart Port integration."""
+"""Constants for the Sigenergy Cloud Control integration."""
 
 from homeassistant.const import Platform
 

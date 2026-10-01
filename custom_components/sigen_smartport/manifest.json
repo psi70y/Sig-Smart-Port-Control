@@ -1,6 +1,6 @@
 {
   "domain": "sigen_smartport",
-  "name": "Sigenergy Smart Port",
+  "name": "Sigenergy Cloud Control",
   "documentation": "https://github.com/psi70y/Sig-Smart-Port-Control",
   "issue_tracker": "https://github.com/psi70y/Sig-Smart-Port-Control/issues",
   "dependencies": [],

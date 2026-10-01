@@ -1,4 +1,4 @@
-"""Select platform for Sigenergy Smart Port / AC Charger - config-entry based."""
+"""Select platform for Sigenergy Cloud Control (Smart Port loads / AC Charger) - config-entry based."""
 
 import logging
 
@@ -211,4 +211,4 @@ class SigenManualControlActionSelector(SigenManualControlSettingEntity, SelectEn
     async def async_select_option(self, option: str) -> None:
         await self._settings.async_set(action=option)
         self.async_write_ha_state()
-        _LOGGER.info("Sigen Smart Port: manual control action set to %s (used on next start)", option)
+        _LOGGER.info("Sigenergy Cloud Control: manual control action set to %s (used on next start)", option)

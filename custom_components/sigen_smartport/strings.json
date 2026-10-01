@@ -66,7 +66,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Sigen Smart Port options",
+        "title": "Sigenergy Cloud Control options",
         "description": "How often Home Assistant polls the Sigen cloud for this device's real state. Lower values catch changes faster but log in more often - the default of 300s (5 minutes) is a sensible balance.",
         "data": {
           "region": "Region",

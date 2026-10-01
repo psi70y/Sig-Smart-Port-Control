@@ -132,7 +132,7 @@ class SigenManualControlDurationNumber(SigenManualControlSettingEntity, NumberEn
     async def async_set_native_value(self, value: float) -> None:
         await self._settings.async_set(duration=int(value))
         self.async_write_ha_state()
-        _LOGGER.info("Sigen Smart Port: manual control duration set to %d min (used on next start)", int(value))
+        _LOGGER.info("Sigenergy Cloud Control: manual control duration set to %d min (used on next start)", int(value))
 
 
 class SigenManualControlPowerLimitNumber(SigenManualControlSettingEntity, NumberEntity):
@@ -160,6 +160,6 @@ class SigenManualControlPowerLimitNumber(SigenManualControlSettingEntity, Number
         await self._settings.async_set(power_limit=value)
         self.async_write_ha_state()
         if value:
-            _LOGGER.info("Sigen Smart Port: manual control power limit set to %.1f kW (used on next start)", value)
+            _LOGGER.info("Sigenergy Cloud Control: manual control power limit set to %.1f kW (used on next start)", value)
         else:
-            _LOGGER.info("Sigen Smart Port: manual control power limit set to no limit (used on next start)")
+            _LOGGER.info("Sigenergy Cloud Control: manual control power limit set to no limit (used on next start)")

@@ -3,9 +3,9 @@
 ## 1. Purpose
 
 This document sets out how AC/DC EV charging support will be developed for
-the Sigenergy Smart Port integration, and the working arrangement between
-the project Maintainer and the Contributor assisting with network capture
-and device access.
+the Sigenergy Cloud Control integration (formerly Sigenergy Smart Port),
+and the working arrangement between the project Maintainer and the
+Contributor assisting with network capture and device access.
 
 ## 2. Parties
 

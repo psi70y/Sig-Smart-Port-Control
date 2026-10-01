@@ -1,4 +1,5 @@
-"""The Sigenergy Smart Port integration."""
+"""The Sigenergy Cloud Control integration (domain sigen_smartport, formerly
+named Sigenergy Smart Port)."""
 
 import logging
 import time
@@ -168,7 +169,7 @@ def _release_station_profile(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 and str(other.data.get(CONF_STATION_ID)) == station_id
                 and other.state is ConfigEntryState.LOADED):
             _LOGGER.info(
-                "Sigen Smart Port: handing station %s Energy Profile over to entry '%s'",
+                "Sigenergy Cloud Control: handing station %s Energy Profile over to entry '%s'",
                 station_id, other.title,
             )
             hass.async_create_task(hass.config_entries.async_reload(other.entry_id))
@@ -205,13 +206,13 @@ class _StationCoordinatorMixin:
             self.hass, self._async_manual_end_reached, dt_util.utc_from_timestamp(when)
         )
         _LOGGER.debug(
-            "Sigen Smart Port: will re-check manual control at %s",
+            "Sigenergy Cloud Control: will re-check manual control at %s",
             datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def _async_manual_end_reached(self, _now) -> None:
         self._manual_end_unsub = None
-        _LOGGER.debug("Sigen Smart Port: manual control end time reached, refreshing")
+        _LOGGER.debug("Sigenergy Cloud Control: manual control end time reached, refreshing")
         await self.async_request_refresh()
 
     async def async_manual_control_sent(self) -> None:
@@ -431,7 +432,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await store.async_save({"token": token, "expiry": expiry_epoch, "refresh_token": refresh_token})
         expiry_str = datetime.fromtimestamp(expiry_epoch).strftime("%Y-%m-%d %H:%M:%S")
         _LOGGER.info(
-            "Sigen Smart Port: saved refreshed auth token to disk (valid until %s)", expiry_str
+            "Sigenergy Cloud Control: saved refreshed auth token to disk (valid until %s)", expiry_str
         )
 
     is_ac_charger = _get_device_kind(entry) == DEVICE_KIND_AC_CHARGER

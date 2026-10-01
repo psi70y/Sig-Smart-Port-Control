@@ -1,4 +1,4 @@
-"""Config flow for Sigenergy Smart Port + AC Charger."""
+"""Config flow for Sigenergy Cloud Control (Smart Port load + AC Charger)."""
 
 import logging
 
