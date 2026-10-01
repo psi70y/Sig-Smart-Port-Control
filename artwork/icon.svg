@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+ <defs>
+  <linearGradient id="g" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+   <stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#4338ca"/></linearGradient>
+ </defs>
+ <rect width="256" height="256" rx="56" fill="url(#g)"/>
+ <g stroke="#fff" stroke-width="11" stroke-linecap="round" fill="none">
+  <path d="M104 118 L68 168"/><path d="M128 120 V166"/><path d="M152 118 L188 168"/>
+ </g>
+ <g fill="#fff">
+  <circle cx="104" cy="82" r="27"/><circle cx="138" cy="66" r="35"/><circle cx="168" cy="92" r="22"/>
+  <rect x="76" y="82" width="114" height="40" rx="20"/>
+ </g>
+ <g fill="#fff"><circle cx="60" cy="191" r="29"/><circle cx="128" cy="191" r="29"/><circle cx="196" cy="191" r="29"/></g>
+ <!-- plug -->
+ <g fill="url(#g)">
+  <rect x="51" y="174" width="6" height="11" rx="3"/><rect x="63" y="174" width="6" height="11" rx="3"/>
+  <path d="M46 183 H74 V191 A14 14 0 0 1 60 205 A14 14 0 0 1 46 191 Z"/>
+  <rect x="57" y="203" width="6" height="7" rx="2"/>
+ </g>
+ <!-- bolt -->
+ <path d="M133 173 L116 194 H127 L122 210 L140 187 H129 Z" fill="url(#g)"/>
+ <!-- car, front view -->
+ <g fill="url(#g)">
+  <path d="M184 186 L188 176 Q189.5 173 193 173 H199 Q202.5 173 204 176 L208 186 Z"/>
+  <rect x="179" y="184" width="34" height="15" rx="5"/>
+  <rect x="182" y="197" width="7" height="8" rx="2"/><rect x="203" y="197" width="7" height="8" rx="2"/>
+ </g>
+ <g fill="#fff"><circle cx="186" cy="191" r="3"/><circle cx="206" cy="191" r="3"/></g>
+</svg>
