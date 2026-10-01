@@ -9,6 +9,7 @@ authenticated request helper. Two concrete clients build on it:
     PATCH .../control-mode/manual/switch   -> set contactor on/off
     PATCH .../control-mode                 -> set Auto/Manual mode
     GET/PUT .../energy-profile/mode/...    -> station-wide operation mode
+    GET/PUT .../energy-profile/instant/manunal -> Instant Manual Control
 
   - SigenAcChargerClient: AC EV charger status + charging mode
     GET  .../acevse/charge/status          -> plug/charge status code
@@ -48,6 +49,10 @@ _TOKEN_EXPIRY_BUFFER_SECONDS = 5 * 60
 # only log in once or twice a day anyway, so old tokens are left to expire
 # naturally server-side instead of being explicitly revoked.
 
+# Instant Manual Control mode codes, for log messages only. The full
+# mapping used by the entities lives in const.py (MANUAL_ACTION_MODES).
+_MANUAL_MODE_NAMES = {"0": "Charging", "1": "Discharging", "2": "Hold Battery", "3": "Self-Consumption"}
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
@@ -86,6 +91,15 @@ class _SigenBaseClient:
         self.profile_options_fetched_at = None
         self.current_energy_mode = None
         self.current_profile_id = None
+
+        # Station-wide Instant Manual Control, also usable from any client.
+        self.manual_enabled = None    # None until first read
+        self.manual_mode = None       # cloud mode string, e.g. "0" = Charging
+        self.manual_end_time = None   # wall-clock epoch seconds
+
+    @property
+    def station_id(self) -> str:
+        return str(self._station_id)
 
     def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
         """Reload a previously-persisted token (e.g. after a restart) so we
@@ -339,6 +353,105 @@ class _SigenBaseClient:
                 return True
         _LOGGER.error("Error setting Sigen energy profile: %s", res.text if res else "no response")
         return False
+
+    # ---------------------------------------------- instant manual control
+    # "manunal" is Sigen's own spelling in the endpoint path - keep it.
+
+    def fetch_manual_control(self):
+        """Read whether Instant Manual Control is active, its mode and its
+        end time. Also picks up manual control started from the mySigen app."""
+        url = f"{self._base_url}/device/energy-profile/instant/manunal/{self._station_id}"
+        res = self._request("GET", url)
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen manual control read failed: %s", res.text if res else "no response")
+            return False
+        try:
+            body = res.json()
+        except ValueError:
+            return False
+        if body.get("code") != 0:
+            _LOGGER.debug("Sigen manual control read rejected: %s", body)
+            return False
+
+        data = body.get("data") or {}
+        enabled = bool(data.get("enable"))
+        mode = data.get("mode") if enabled else None
+        end_time = None
+        if enabled:
+            try:
+                end_time = float(data.get("endTime"))
+            except (TypeError, ValueError):
+                end_time = None
+
+        first_read = self.manual_enabled is None
+        if enabled != self.manual_enabled or mode != self.manual_mode:
+            if enabled:
+                end_str = (datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S")
+                           if end_time else "unknown")
+                _LOGGER.info(
+                    "Sigen Smart Port: Instant Manual Control is %s - %s until %s",
+                    "active" if first_read else "now active",
+                    _MANUAL_MODE_NAMES.get(mode, f"mode {mode}"), end_str,
+                )
+            elif not first_read:
+                _LOGGER.info(
+                    "Sigen Smart Port: Instant Manual Control has ended - station is back on its Energy Profile"
+                )
+
+        self.manual_enabled = enabled
+        self.manual_mode = mode
+        self.manual_end_time = end_time
+        return True
+
+    def _put_manual_control(self, body):
+        url = f"{self._base_url}/device/energy-profile/instant/manunal"
+        res = self._request("PUT", url, json_body=body)
+        if res is not None and res.status_code == 200:
+            try:
+                ok = res.json().get("data") is True
+            except ValueError:
+                ok = False
+            if ok:
+                return True
+        _LOGGER.error("Error sending Sigen manual control %s: %s", body, res.text if res else "no response")
+        return False
+
+    def start_manual_control(self, mode: str, duration_min: int, power_limitation: str):
+        """Start Instant Manual Control. All values are sent as strings,
+        exactly as the app does: mode "0"-"3", duration in minutes, and
+        power_limitation in kW ("5.0"), "4294967.295" for no limit, or ""
+        for actions that don't use one."""
+        body = {
+            "enable": True,
+            "stationId": int(self._station_id),
+            "mode": mode,
+            "duration": str(duration_min),
+            "powerLimitation": power_limitation,
+        }
+        if not self._put_manual_control(body):
+            return False
+        # Best guess until the next read returns the cloud's own end time.
+        self.manual_enabled = True
+        self.manual_mode = mode
+        self.manual_end_time = time.time() + duration_min * 60
+        return True
+
+    def stop_manual_control(self):
+        """End Instant Manual Control now. The app sends empty strings for
+        the other fields rather than leaving them out, so do the same."""
+        body = {
+            "enable": False,
+            "stationId": int(self._station_id),
+            "mode": "",
+            "duration": "",
+            "powerLimitation": "",
+        }
+        if not self._put_manual_control(body):
+            return False
+        self.manual_enabled = False
+        self.manual_mode = None
+        self.manual_end_time = None
+        return True
 
 
 class SigenSmartLoadClient(_SigenBaseClient):
