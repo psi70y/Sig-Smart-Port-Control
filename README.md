@@ -279,6 +279,7 @@ entities:
 - **Charging with no power limit can draw a lot from the grid.** Set a power limit if that matters for your tariff or connection.
 - **Start is refused while manual control is already running**, from the button and from the action, with a message saying what's running and until when. Press **Stop Manual Control** first, then start the new one. Just before starting, the integration re-checks the status with Sigenergy, so this also catches manual control started in the mySigen app since the last poll.
 - **If Sigenergy rejects a start or stop**, Home Assistant shows an error and the details are logged.
+- **Don't combine this with Remote EMS** from a local Modbus integration. See [Using it alongside a local Modbus integration](#using-it-alongside-a-local-modbus-integration).
 
 ---
 
@@ -321,6 +322,23 @@ All of these are grouped under one **AC EV Charger** device.
 - **Every change is read back from the cloud.** The Sigen cloud can report success for a change it ignored, so HA always re-reads the charger after a write. The state you see is what the cloud actually applied.
 - **Grid Charging Max Power while Grid Charging is off.** The cloud forces max grid power to 0 whenever Grid Charging is off. While it's off, the number entity shows the value that will be used next time instead, and a value you set then is saved and applied when Grid Charging is switched back on. This value is saved to disk, so it survives Home Assistant restarts. If no earlier value is known at all, 1 kW is used and a warning is logged.
 - **Changes made close together are applied in order.** Several changes at once (for example from one automation) are sent one after another, so they can't overwrite each other.
+
+---
+
+## Using it alongside a local Modbus integration
+
+Many Sigenergy owners also run a local Modbus integration, such as [Sigenergy ESS (Local Modbus)](https://github.com/TypQxQ/Sigenergy-Local-Modbus). The two complement each other. Modbus gives fast local readings of power, energy and battery state, and some local controls. This integration does things that are only available through Sigenergy's cloud.
+
+| Feature in this integration | Fine to use alongside a Modbus integration? |
+|---|---|
+| Smart Port loads (on/off, Manual/Auto) | ✅ Yes. Modbus only reads smart load consumption |
+| AC EV Charger settings (Charging Mode, Battery Boost, Grid Charging) | ✅ Yes. Modbus covers different charger controls (start/stop, output current) |
+| Energy Profile and Instant Manual Control | ⚠️ Not together with Remote EMS (see below) |
+
+**Recommendation: use only one thing to control what the plant does.** Don't use this integration's **Energy Profile** or **Instant Manual Control** while **Remote EMS** is enabled through a Modbus integration. Both tell the battery and inverter what to do, so they would override each other. Remote EMS takes the plant off its Energy Profile until Remote EMS is switched off again. Instant Manual Control expects the Energy Profile to take over again when it ends.
+
+- **If you control the plant with Remote EMS**, leave this integration's Energy Profile and manual control entities alone. You can disable them in Home Assistant so they can't be used by accident. Smart Port and AC charger control from this integration still work fine.
+- **If you control the plant with this integration**, keep Remote EMS switched off in the Modbus integration. Reading sensors from Modbus is fine.
 
 ---
 
