@@ -8,6 +8,7 @@ doesn't give these settings back, so they're saved to disk with HA's Store
 """
 
 import logging
+import time
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -16,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    MANUAL_ACTION_LABELS,
     MANUAL_ACTION_MODES,
     MANUAL_ACTION_SELF_CONSUMPTION,
     MANUAL_ACTIONS_WITH_POWER_LIMIT,
@@ -115,6 +117,22 @@ async def async_start_manual_control(hass: HomeAssistant, coordinator, action: s
         power_limitation = ""
 
     client = coordinator.client
+    # Refuse to start over a running manual control - stop it first. Re-read
+    # the status first, so manual control started in the mySigen app since
+    # the last poll is caught too. If the read fails, use the last known state.
+    await hass.async_add_executor_job(client.fetch_manual_control)
+    coordinator.async_show_manual_control_state()
+    if client.manual_enabled and (client.manual_end_time or 0) > time.time():
+        running = MANUAL_ACTION_LABELS.get(client.manual_mode, "Manual control")
+        end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
+        _LOGGER.warning(
+            "Sigen Smart Port: not starting %s - %s is already running until %s. Stop it first",
+            action, running, end_str,
+        )
+        raise ServiceValidationError(
+            f"Manual control is already running ({running} until {end_str}). Stop it first."
+        )
+
     ok = await hass.async_add_executor_job(
         client.start_manual_control, MANUAL_ACTION_MODES[action], duration, power_limitation
     )

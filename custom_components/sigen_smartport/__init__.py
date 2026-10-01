@@ -219,9 +219,15 @@ class _StationCoordinatorMixin:
         was sent, then refresh to pick up the cloud's own end time. The
         refresh alone can lag up to 10s, since HA spaces out back-to-back
         refresh requests (e.g. Stop pressed right after Start)."""
+        self.async_show_manual_control_state()
+        await self.async_request_refresh()
+
+    @callback
+    def async_show_manual_control_state(self) -> None:
+        """Pass the client's current manual control state to the entities
+        now, without waiting for the next poll."""
         self.async_set_updated_data({**self.data, **self._manual_control_data()})
         self._schedule_manual_end_refresh()
-        await self.async_request_refresh()
 
     @callback
     def cancel_manual_end_refresh(self) -> None:

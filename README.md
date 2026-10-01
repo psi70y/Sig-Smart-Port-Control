@@ -270,7 +270,7 @@ entities:
 ### Good to know
 
 - **Charging with no power limit can draw a lot from the grid.** Set a power limit if that matters for your tariff or connection.
-- **Starting while manual control is already running** sends the new settings straight away. What Sigenergy does then hasn't been tested yet; stopping first is the safe option.
+- **Start is refused while manual control is already running**, from the button and from the action, with a message saying what's running and until when. Press **Stop Manual Control** first, then start the new one. Just before starting, the integration re-checks the status with Sigenergy, so this also catches manual control started in the mySigen app since the last poll.
 - **If Sigenergy rejects a start or stop**, Home Assistant shows an error and the details are logged.
 
 ---
