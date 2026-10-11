@@ -49,6 +49,8 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 
 ## Installation
 
+Requires Home Assistant 2024.1 or later. It's ready for Home Assistant 2026.9 and later, which validate with probatio instead of voluptuous.
+
 ### Option A — HACS (recommended)
 
 1. In HA: **HACS → ⋮ (top right) → Custom repositories**

@@ -2,13 +2,23 @@
 
 import logging
 
-import voluptuous as vol
+# HA 2026.9 replaced voluptuous with probatio (same API).
+# Fall back so older HA versions still load.
+try:
+    import probatio as vol
+except ImportError:  # HA < 2026.9
+    import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.data_entry_flow import FlowResult
+
+# ConfigFlowResult arrived in HA 2024.4; older versions only have FlowResult.
+try:
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:  # HA < 2024.4
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
 
 from .const import (
     DOMAIN,
@@ -146,7 +156,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._user_input: dict = {}
 
-    async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         """First step: choose which kind of device to add."""
         return self.async_show_menu(
             step_id="user",
@@ -154,7 +164,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # --------------------------------------------------------- Smart Port
-    async def async_step_smart_port(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_smart_port(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -166,7 +176,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="smart_port", data_schema=STEP_SMART_PORT_SCHEMA, errors=errors
         )
 
-    async def async_step_smart_port_advanced(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_smart_port_advanced(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -203,7 +213,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return {CONF_USERNAME: data[CONF_USERNAME], CONF_PASSWORD: data[CONF_PASSWORD]}
         return None
 
-    async def async_step_ac_charger(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_ac_charger(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -223,7 +233,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="ac_charger", data_schema=STEP_AC_CHARGER_SCHEMA, errors=errors
         )
 
-    async def async_step_ac_charger_advanced(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_ac_charger_advanced(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -261,7 +271,7 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
 
-    async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=_resolve_base_url(dict(user_input)))
 

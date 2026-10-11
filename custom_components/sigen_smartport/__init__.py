@@ -5,7 +5,12 @@ import logging
 import time
 from datetime import datetime, timedelta
 
-import voluptuous as vol
+# HA 2026.9 replaced voluptuous with probatio (same API).
+# Fall back so older HA versions still load.
+try:
+    import probatio as vol
+except ImportError:  # HA < 2026.9
+    import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, callback
