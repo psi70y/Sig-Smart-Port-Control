@@ -149,7 +149,7 @@ These are added to the **Sigen Station** device, next to the Energy Profile sele
 | Manual Control Action | Select | Charging, Discharging, Hold Battery or Self-Consumption |
 | Manual Control Duration | Number (min) | How long to run, 1–1440 minutes (24 hours). Default 30 |
 | Manual Control Power Limit | Number (kW) | Maximum charge or discharge power, 0–30 kW. **0 means no limit.** Only used for Charging and Discharging |
-| Start Manual Control | Button | Starts manual control with the three settings above |
+| Start Manual Control | Button | Starts manual control with the three settings above. Replaces any manual control that's already running |
 | Stop Manual Control | Button | Ends manual control now |
 | Manual Control | Sensor | `Off`, or the action that's running. The raw mode code is in the `mode_code` attribute |
 | Manual Control Ends | Sensor (timestamp) | When the running manual control ends (shown as e.g. "in 23 minutes"). Unknown while it's off |
@@ -171,6 +171,7 @@ data:
   action: charging        # charging, discharging, hold_battery or self_consumption
   duration: 120           # minutes, 1-1440 (optional, default 30)
   power_limit: 5.0        # kW (optional - leave out or use 0 for no limit)
+  replace_running: true   # optional, default false - see "Good to know"
 ```
 
 ```yaml
@@ -279,7 +280,10 @@ entities:
 ### Good to know
 
 - **Charging with no power limit can draw a lot from the grid.** Set a power limit if that matters for your tariff or connection.
-- **Start is refused while manual control is already running**, from the button and from the action, with a message saying what's running and until when. Press **Stop Manual Control** first, then start the new one. Just before starting, the integration re-checks the status with Sigenergy, so this also catches manual control started in the mySigen app since the last poll.
+- **Starting while manual control is already running:**
+  - **The Start Manual Control button replaces it.** The integration stops the running one, checks with Sigenergy that it has stopped (a few seconds), then starts the new one. If Sigenergy doesn't confirm the stop in time, the new one isn't started, the station stays on its Energy Profile, and Home Assistant shows an error.
+  - **The `start_manual_control` action refuses by default**, with a message saying what's running and until when. Add `replace_running: true` to replace it instead, the same way the button does.
+  - Just before starting, the integration re-checks the status with Sigenergy, so this also catches manual control started in the mySigen app since the last poll.
 - **If Sigenergy rejects a start or stop**, Home Assistant shows an error and the details are logged.
 - **Don't combine this with Remote EMS** from a local Modbus integration. See [Using it alongside a local Modbus integration](#using-it-alongside-a-local-modbus-integration).
 

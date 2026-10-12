@@ -113,6 +113,10 @@
         "power_limit": {
           "name": "Power limit",
           "description": "Maximum charge or discharge power in kW. Only used for Charging and Discharging. Leave empty or set 0 for no limit."
+        },
+        "replace_running": {
+          "name": "Replace running manual control",
+          "description": "If manual control is already running, stop it and start this one instead. When off (the default), the action fails while manual control is running."
         }
       }
     },

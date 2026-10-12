@@ -1,6 +1,7 @@
 """The Sigenergy Cloud Control integration (domain sigen_smartport, formerly
 named Sigenergy Smart Port)."""
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
@@ -90,6 +91,7 @@ START_MANUAL_CONTROL_SCHEMA = vol.Schema({
     vol.Optional("power_limit"): vol.All(
         vol.Coerce(float), vol.Range(min=MANUAL_POWER_LIMIT_MIN, max=MANUAL_POWER_LIMIT_MAX)
     ),
+    vol.Optional("replace_running", default=False): cv.boolean,
 })
 STOP_MANUAL_CONTROL_SCHEMA = vol.Schema({**cv.TARGET_SERVICE_FIELDS})
 
@@ -187,6 +189,15 @@ class _StationCoordinatorMixin:
     # ManualControlSettings for the owning entry, None otherwise.
     manual_settings = None
     _manual_end_unsub = None
+    _manual_lock = None
+
+    @property
+    def manual_lock(self) -> asyncio.Lock:
+        """Held while a manual control start/stop is being sent, so only
+        one runs at a time for this station."""
+        if self._manual_lock is None:
+            self._manual_lock = asyncio.Lock()
+        return self._manual_lock
 
     def _manual_control_data(self) -> dict:
         return {
@@ -385,6 +396,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 MANUAL_ACTION_KEYS[call.data["action"]],
                 call.data["duration"],
                 call.data.get("power_limit"),
+                replace_running=call.data["replace_running"],
             )
 
     async def _async_stop(call: ServiceCall) -> None:

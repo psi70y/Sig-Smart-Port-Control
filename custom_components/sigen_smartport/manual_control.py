@@ -1,5 +1,6 @@
 """Instant Manual Control - saved settings plus the start/stop logic shared
-by the Start/Stop buttons and the start/stop_manual_control actions.
+by the Start/Stop buttons and the start/stop_manual_control actions,
+including replacing a running manual control (stop, confirm, start).
 
 The Action, Duration and Power Limit entities only hold settings for the
 next start; nothing is sent to the cloud until Start is pressed. The cloud
@@ -7,6 +8,7 @@ doesn't give these settings back, so they're saved to disk with HA's Store
 (one file per station) and survive restarts.
 """
 
+import asyncio
 import logging
 import time
 
@@ -33,6 +35,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Bumped only if the persisted settings file's shape ever changes.
 MANUAL_CONTROL_STORAGE_VERSION = 1
+
+# When replacing a running manual control: wait this long before each
+# re-read that checks the stop has taken effect (6 s in total).
+RESTART_CONFIRM_DELAYS_SECONDS = (1, 2, 3)
 
 
 def manual_control_store(hass: HomeAssistant, station_id) -> Store:
@@ -93,9 +99,25 @@ def describe_power_limit(action: str, power_limit: float | None) -> str:
     return f"power limit {power_limit:.1f} kW"
 
 
+def _is_running(client) -> bool:
+    return bool(client.manual_enabled and (client.manual_end_time or 0) > time.time())
+
+
+def _describe_running(client) -> tuple[str, str]:
+    """(action label, local end time "HH:MM") of the running manual control."""
+    running = MANUAL_ACTION_LABELS.get(client.manual_mode, "Manual control")
+    end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
+    return running, end_str
+
+
 async def async_start_manual_control(hass: HomeAssistant, coordinator, action: str,
-                                     duration: int, power_limit: float | None) -> None:
+                                     duration: int, power_limit: float | None,
+                                     replace_running: bool = False) -> None:
     """Validate, send the start request, then refresh so the sensors update.
+
+    If manual control is already running, it's refused unless
+    replace_running is set - then the running one is stopped first (see
+    _async_stop_and_confirm) and the new one started.
 
     Raises an error HA shows to the user (a toast for buttons, a failed
     step for automations) instead of failing silently.
@@ -117,39 +139,78 @@ async def async_start_manual_control(hass: HomeAssistant, coordinator, action: s
         power_limitation = ""
 
     client = coordinator.client
-    # Refuse to start over a running manual control - stop it first. Re-read
-    # the status first, so manual control started in the mySigen app since
-    # the last poll is caught too. If the read fails, use the last known state.
-    await hass.async_add_executor_job(client.fetch_manual_control)
-    coordinator.async_show_manual_control_state()
-    if client.manual_enabled and (client.manual_end_time or 0) > time.time():
-        running = MANUAL_ACTION_LABELS.get(client.manual_mode, "Manual control")
+    # One start/stop at a time per station, so two quick presses (or a
+    # button and an automation) can't interleave their requests.
+    async with coordinator.manual_lock:
+        # Re-read the status first, so manual control started in the mySigen
+        # app since the last poll is caught too. If the read fails, use the
+        # last known state.
+        await hass.async_add_executor_job(client.fetch_manual_control)
+        coordinator.async_show_manual_control_state()
+        if _is_running(client):
+            running, end_str = _describe_running(client)
+            if not replace_running:
+                _LOGGER.warning(
+                    "Sigenergy Cloud Control: not starting %s - %s is already running until %s. Stop it first",
+                    action, running, end_str,
+                )
+                raise ServiceValidationError(
+                    f"Manual control is already running ({running} until {end_str}). Stop it first."
+                )
+            _LOGGER.info(
+                "Sigenergy Cloud Control: replacing %s (until %s) with %s - stopping it first",
+                running, end_str, action,
+            )
+            await _async_stop_and_confirm(hass, coordinator)
+
+        ok = await hass.async_add_executor_job(
+            client.start_manual_control, MANUAL_ACTION_MODES[action], duration, power_limitation
+        )
+        if not ok:
+            raise HomeAssistantError("Sigen cloud rejected the manual control start - see the log for details")
+
         end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
-        _LOGGER.warning(
-            "Sigenergy Cloud Control: not starting %s - %s is already running until %s. Stop it first",
-            action, running, end_str,
+        _LOGGER.info(
+            "Sigenergy Cloud Control: started Instant Manual Control - %s for %d min, %s (until about %s)",
+            action, duration, describe_power_limit(action, power_limit), end_str,
         )
-        raise ServiceValidationError(
-            f"Manual control is already running ({running} until {end_str}). Stop it first."
-        )
-
-    ok = await hass.async_add_executor_job(
-        client.start_manual_control, MANUAL_ACTION_MODES[action], duration, power_limitation
-    )
-    if not ok:
-        raise HomeAssistantError("Sigen cloud rejected the manual control start - see the log for details")
-
-    end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
-    _LOGGER.info(
-        "Sigenergy Cloud Control: started Instant Manual Control - %s for %d min, %s (until about %s)",
-        action, duration, describe_power_limit(action, power_limit), end_str,
-    )
     await coordinator.async_manual_control_sent()
+
+
+async def _async_stop_and_confirm(hass: HomeAssistant, coordinator) -> None:
+    """Stop the running manual control, then re-read until the cloud reports
+    it stopped, so the following start isn't sent on top of it. The cloud
+    has not been seen accepting a start over a running session, so this
+    doesn't rely on it. Caller must hold coordinator.manual_lock."""
+    client = coordinator.client
+    ok = await hass.async_add_executor_job(client.stop_manual_control)
+    if not ok:
+        raise HomeAssistantError("Sigen cloud rejected the manual control stop - see the log for details")
+
+    for delay in RESTART_CONFIRM_DELAYS_SECONDS:
+        await asyncio.sleep(delay)
+        # Only a successful read counts - a failed one leaves the "stopped"
+        # state stop_manual_control just set locally.
+        if await hass.async_add_executor_job(client.fetch_manual_control) and not _is_running(client):
+            _LOGGER.info("Sigenergy Cloud Control: confirmed manual control stopped, starting the new one")
+            return
+
+    coordinator.async_show_manual_control_state()
+    _LOGGER.error(
+        "Sigenergy Cloud Control: stopped manual control, but Sigenergy didn't confirm it within %d s - "
+        "not starting the new one",
+        sum(RESTART_CONFIRM_DELAYS_SECONDS),
+    )
+    raise HomeAssistantError(
+        "Stopped the running manual control, but Sigenergy didn't confirm it in time, so the new one "
+        "wasn't started. Check the Manual Control sensor and try again."
+    )
 
 
 async def async_stop_manual_control(hass: HomeAssistant, coordinator) -> None:
     client = coordinator.client
-    ok = await hass.async_add_executor_job(client.stop_manual_control)
+    async with coordinator.manual_lock:
+        ok = await hass.async_add_executor_job(client.stop_manual_control)
     if not ok:
         raise HomeAssistantError("Sigen cloud rejected the manual control stop - see the log for details")
     _LOGGER.info("Sigenergy Cloud Control: stopped Instant Manual Control - station is back on its Energy Profile")

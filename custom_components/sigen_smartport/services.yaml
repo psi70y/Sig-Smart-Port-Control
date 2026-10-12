@@ -36,6 +36,12 @@ start_manual_control:
           step: 0.1
           unit_of_measurement: kW
           mode: box
+    replace_running:
+      required: false
+      default: false
+      example: true
+      selector:
+        boolean:
 
 stop_manual_control:
   target:
