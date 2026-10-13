@@ -88,11 +88,13 @@
         "data": {
           "price_spike_enabled": "Turn on Price Spike Export",
           "price_spike_price_entity": "Price entity",
+          "price_spike_price_unit": "Price unit (optional)",
           "price_spike_soc_entity": "Battery SOC entity (%)",
           "price_spike_notify_action": "Notify action (optional)"
         },
         "data_description": {
           "price_spike_price_entity": "A numeric price sensor, such as a wholesale or spot price. An input_number helper also works, for testing.",
+          "price_spike_price_unit": "Shown next to the threshold, for example $/kWh or EUR/MWh. Only used if the price entity doesn't report a unit itself. It's just a label: the threshold is always compared with the entity's value as it is.",
           "price_spike_soc_entity": "Your battery's state of charge in %, for example from a local Modbus integration. The Sigenergy cloud API used here doesn't provide it.",
           "price_spike_notify_action": "For example notify.mobile_app_your_phone. Called when discharging starts and stops. Leave blank to only fire the events sigen_smartport_price_spike_export_started and sigen_smartport_price_spike_export_stopped."
         }

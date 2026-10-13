@@ -305,14 +305,14 @@ Discharges the battery to the grid while electricity prices spike, then hands co
   - **Europe / UK:** Nord Pool, ENTSO-E, EPEX Spot, Tibber or Octopus Energy
 - **A battery SOC entity (%)**, for example from a [local Modbus integration](#using-it-alongside-a-local-modbus-integration). The Sigenergy cloud API this integration uses doesn't provide SOC, so it has to come from somewhere else. Price Spike Export won't start without a valid SOC reading.
 
-**The threshold is in your price entity's own unit and currency.** If the entity reports $/kWh, a threshold of `1.0` means $1.00/kWh. If it reports EUR/MWh, use EUR/MWh.
+**The threshold is in your price entity's own unit and currency.** If the entity reports $/kWh, a threshold of `1.0` means $1.00/kWh. If it reports EUR/MWh, use EUR/MWh. The threshold shows the price entity's unit. Some price entities don't report one (check its `unit_of_measurement` attribute in **Developer Tools → States**). For those, enter the unit in **Price unit** in Configure so it's shown on the threshold.
 
 > **A price threshold is a proxy, not an official signal.** Retailer events such as critical peak, VPP or demand response are often triggered by high wholesale prices, but your retailer decides when they happen and what they pay. Compare your threshold with your retailer's actual event records (for example, which intervals your bill credited) and adjust it until they match.
 
 ### Turning it on
 
 1. Go to **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Price Spike Export**. On a station with several entries (for example two Smart Port loads), it's on the entry that owns the station's Energy Profile.
-2. Tick **Turn on Price Spike Export**, choose the **price entity** and the **battery SOC entity**, and optionally a **notify action** (for example `notify.mobile_app_your_phone`).
+2. Tick **Turn on Price Spike Export**, choose the **price entity** and the **battery SOC entity**, and optionally a **price unit** (only needed if the price entity doesn't report one) and a **notify action** (for example `notify.mobile_app_your_phone`).
 3. Submit. The entities below appear on the **Sigen Station** device. Turning the feature off in Configure removes them again, and stops a discharge session it started.
 4. Check the settings, then turn on the **Price Spike Export** switch to arm it.
 
@@ -333,7 +333,7 @@ All settings can be changed from a dashboard at any time, and are saved to disk 
 | Price Spike Active | Binary sensor | | On while the price is at or above the threshold (after the start delay) |
 | Price Spike Discharging | Binary sensor | | On only while a session started by Price Spike Export is running, never for one you started |
 
-Both binary sensors have these attributes: `current_price`, `threshold`, `soc`, `spike_started`, `hold_ends` and `last_stop_reason`.
+The threshold has `price_entity` and `current_price` attributes. Both binary sensors have these attributes: `current_price`, `threshold`, `soc`, `spike_started`, `hold_ends` and `last_stop_reason`.
 
 ### How it behaves
 

@@ -42,6 +42,7 @@ from .const import (
     CONF_SPIKE_ENABLED,
     CONF_SPIKE_NOTIFY_ACTION,
     CONF_SPIKE_PRICE_ENTITY,
+    CONF_SPIKE_PRICE_UNIT,
     CONF_SPIKE_SOC_ENTITY,
     SPIKE_OPTION_KEYS,
     DEFAULT_BASE_URL,
@@ -354,6 +355,9 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
                 for key in (CONF_SPIKE_PRICE_ENTITY, CONF_SPIKE_SOC_ENTITY):
                     if user_input.get(key):
                         options[key] = user_input[key]
+                price_unit = (user_input.get(CONF_SPIKE_PRICE_UNIT) or "").strip()
+                if price_unit:
+                    options[CONF_SPIKE_PRICE_UNIT] = price_unit
                 if notify_action:
                     options[CONF_SPIKE_NOTIFY_ACTION] = notify_action
                 return self.async_create_entry(title="", data=options)
@@ -361,6 +365,7 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema({
             vol.Optional(CONF_SPIKE_ENABLED, default=False): bool,
             vol.Optional(CONF_SPIKE_PRICE_ENTITY): _NUMERIC_ENTITY_SELECTOR,
+            vol.Optional(CONF_SPIKE_PRICE_UNIT): TextSelector(),
             vol.Optional(CONF_SPIKE_SOC_ENTITY): _NUMERIC_ENTITY_SELECTOR,
             vol.Optional(CONF_SPIKE_NOTIFY_ACTION): TextSelector(),
         })

@@ -231,3 +231,10 @@ class SigenPriceSpikeThresholdNumber(SigenPriceSpikeNumber):
     def native_unit_of_measurement(self):
         # The price entity may load after this one, so follow it.
         return self._controller.price_unit
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "price_entity": self._controller.price_entity,
+            "current_price": self._controller.price,
+        }

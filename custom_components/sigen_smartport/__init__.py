@@ -44,6 +44,7 @@ from .const import (
     CONF_SPIKE_ENABLED,
     CONF_SPIKE_NOTIFY_ACTION,
     CONF_SPIKE_PRICE_ENTITY,
+    CONF_SPIKE_PRICE_UNIT,
     CONF_SPIKE_SOC_ENTITY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
@@ -453,6 +454,7 @@ async def _async_setup_price_spike(hass: HomeAssistant, entry: ConfigEntry, coor
         hass, coordinator, station_id,
         options[CONF_SPIKE_PRICE_ENTITY], options[CONF_SPIKE_SOC_ENTITY],
         options.get(CONF_SPIKE_NOTIFY_ACTION),
+        options.get(CONF_SPIKE_PRICE_UNIT),
     )
     await controller.async_load()
     coordinator.price_spike = controller

@@ -173,7 +173,7 @@ class PriceSpikeController:
     timers and the dashboard settings - it never polls."""
 
     def __init__(self, hass: HomeAssistant, coordinator, station_id, price_entity: str,
-                 soc_entity: str, notify_action: str | None):
+                 soc_entity: str, notify_action: str | None, price_unit: str | None = None):
         self.hass = hass
         self.coordinator = coordinator
         self.station_id = str(station_id)
@@ -192,7 +192,9 @@ class PriceSpikeController:
 
         # Live state, worked out again from the entities after a restart.
         self.price = None
-        self.price_unit = None
+        # The price entity's own unit wins; the one set in Configure is the
+        # fallback for entities that don't report one.
+        self.price_unit = price_unit or None
         self.soc = None
         self.spike_active = False       # price at/above threshold, start delay done
         self.hold_ends = None           # set while in the hold time after a dip

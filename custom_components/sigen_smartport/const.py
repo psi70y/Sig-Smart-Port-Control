@@ -143,7 +143,12 @@ CONF_SPIKE_ENABLED = "price_spike_enabled"
 CONF_SPIKE_PRICE_ENTITY = "price_spike_price_entity"
 CONF_SPIKE_SOC_ENTITY = "price_spike_soc_entity"
 CONF_SPIKE_NOTIFY_ACTION = "price_spike_notify_action"
-SPIKE_OPTION_KEYS = (CONF_SPIKE_ENABLED, CONF_SPIKE_PRICE_ENTITY, CONF_SPIKE_SOC_ENTITY, CONF_SPIKE_NOTIFY_ACTION)
+# Shown on the threshold when the price entity doesn't report a unit itself.
+CONF_SPIKE_PRICE_UNIT = "price_spike_price_unit"
+SPIKE_OPTION_KEYS = (
+    CONF_SPIKE_ENABLED, CONF_SPIKE_PRICE_ENTITY, CONF_SPIKE_PRICE_UNIT, CONF_SPIKE_SOC_ENTITY,
+    CONF_SPIKE_NOTIFY_ACTION,
+)
 
 # Dashboard-tunable settings: defaults and ranges.
 SPIKE_THRESHOLD_DEFAULT = 1.0
