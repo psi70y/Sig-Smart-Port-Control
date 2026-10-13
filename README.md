@@ -356,14 +356,15 @@ Both binary sensors have these attributes: `current_price`, `threshold`, `soc`, 
 
 ### Test it safely
 
-Try it with a made-up price before trusting it with a real one:
+You can test with your real price and SOC sensors. Move the threshold to force a spike instead of waiting for a real one:
 
-1. Create two **Number** helpers (**Settings → Devices & Services → Helpers**), for example `input_number.test_price` (0–20, step 0.01) and `input_number.test_soc` (0–100). Set the SOC to something realistic, like 80.
-2. In Configure → Price Spike Export, choose them as the price and SOC entities. Price and SOC accept number helpers for exactly this reason.
-3. Set **Discharge Power** to `1` kW, **Session Duration** to `5` min and **Hold Time** to `2` min, then turn on the **Price Spike Export** switch.
-4. Set the test price above the threshold. Within a few seconds, **Price Spike Discharging** turns on, the **Manual Control** sensor shows Discharging, and the mySigen app shows the manual control.
-5. Set the test price below the threshold. After the hold time, it stops and the station goes back to its Energy Profile.
-6. When you're happy, switch the entities in Configure to your real price and SOC sensors and set your real power, duration and threshold.
+1. Turn the feature on in Configure with your real price and SOC entities.
+2. Set **Discharge Power** to `1` kW, **Session Duration** to `5` min and **Hold Time** to `2` min, then turn on the **Price Spike Export** switch.
+3. **Force a spike:** set **Threshold** below the current price, for example `-1000`. Within a few seconds, **Price Spike Discharging** turns on, the **Manual Control** sensor shows Discharging, and the mySigen app shows the manual control.
+4. **End it:** set **Threshold** far above any real price, for example `100000`. After the hold time, it stops and the station goes back to its Energy Profile.
+5. When you're happy, set your real threshold, power, session duration and hold time.
+
+If you'd rather not touch real sensors, two **Number** helpers (**Settings → Devices & Services → Helpers**) also work as the price and SOC entities.
 
 ---
 
