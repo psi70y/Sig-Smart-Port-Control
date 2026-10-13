@@ -310,7 +310,7 @@ Discharges the battery to the grid while electricity prices spike, then hands co
 > ⚠️ **Choosing the right price entity is critical. The wrong one can trigger real exports at the wrong time.** The integration can't tell whether an entity is really a price. It only compares the entity's number with your threshold, and starts discharging when that number is at or above it. Price integrations often have several similar-looking entities. For example, the AEMO NEM integration has both `sensor.aemo_nem_nsw1_current_5min_period_price` (the price, in $/kWh) and `sensor.aemo_nem_nsw1_periods_of_current_30min` (a count of periods, often 3 or more). With the second one and a threshold of `1.0`, Price Spike Export would treat every moment as a spike and discharge the battery for as long as it's armed. Picking an entity in the wrong unit (for example $/MWh instead of $/kWh) does the same.
 >
 > **Before you arm it, check that:**
-> - the **Price Spike Threshold** shows the unit you expect (for example $/kWh), and
+> - the **Threshold** shows the unit you expect (for example $/kWh), and
 > - its `price_entity` and `current_price` attributes (in **Developer Tools → States**) show the right entity, with a value that matches the current price in your retailer's app or on the market operator's website.
 >
 > If the threshold shows no unit at all, the entity may not be a price. Double-check it before entering a **Price unit** by hand.
@@ -321,26 +321,26 @@ Discharges the battery to the grid while electricity prices spike, then hands co
 
 1. Go to **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Price Spike Export**. On a station with several entries (for example two Smart Port loads), it's on the entry that owns the station's Energy Profile.
 2. Tick **Turn on Price Spike Export**, choose the **price entity** and the **battery SOC entity**, and optionally a **price unit** (only needed if the price entity doesn't report one) and a **notify action** (for example `notify.mobile_app_your_phone`).
-3. Submit. The entities below appear on the **Sigen Station** device. Turning the feature off in Configure removes them again, and stops a discharge session it started.
+3. Submit. A new **Sigen Station … Price Spike Export** device appears, with the entities below. It's put in the same area as the station. Turning the feature off in Configure removes it again, and stops a discharge session it started.
 4. **Check the price entity is the right one** (see the warning above): the threshold shows the expected unit, and its `current_price` attribute matches the actual current price.
 5. Check the settings, then turn on the **Price Spike Export** switch to arm it.
 
 ### Entities
 
-All settings can be changed from a dashboard at any time, and are saved to disk so they survive restarts.
+They're on their own **Sigen Station … Price Spike Export** device. On its device page, the on/off switch is under **Controls**, Active and Discharging under **Sensors**, and the settings under **Configuration**. All settings can be changed from a dashboard at any time, and are saved to disk so they survive restarts. Home Assistant leaves configuration entities out of automatically generated dashboards, so add the ones you want to tune to a card yourself (for example with **Add to dashboard** on the device page).
 
 | Entity | Type | Default | What it does |
 |---|---|---|---|
-| Price Spike Export | Switch | Off | Arms the feature. Turning it off stops a discharge session it started |
-| Price Spike Take Over Manual Control | Switch | Off | What to do if you've started manual control yourself (in the app or HA) when a spike starts. **Off: leave it alone** and start once it ends, if the spike is still on. On: stop it and start discharging |
-| Price Spike Threshold | Number | 1.0 | Price at or above which a spike starts, in the price entity's unit |
-| Price Spike Start Delay | Number (min) | 0 | How long the price must stay at or above the threshold before discharging starts. 0 = straight away |
-| Price Spike Hold Time | Number (min) | 10 | How long the price must stay below the threshold before discharging stops. Keeps it going through short dips |
-| Price Spike Discharge Power | Number (kW) | 10 | Discharge power limit, 0–30 kW. **0 means no limit** |
-| Price Spike Session Duration | Number (min) | 30 | Length of each manual control session. Also the safety backstop, see below |
-| Price Spike Minimum SOC | Number (%) | 20 | Stops at or below this SOC, and doesn't start again until the next spike |
-| Price Spike Active | Binary sensor | | On while the price is at or above the threshold (after the start delay) |
-| Price Spike Discharging | Binary sensor | | On only while a session started by Price Spike Export is running, never for one you started |
+| Price Spike Export (the device's main switch) | Switch | Off | Arms the feature. Turning it off stops a discharge session it started |
+| Active | Binary sensor | | On while the price is at or above the threshold (after the start delay) |
+| Discharging | Binary sensor | | On only while a session started by Price Spike Export is running, never for one you started |
+| Threshold | Number (configuration) | 1.0 | Price at or above which a spike starts, in the price entity's unit |
+| Start Delay | Number (configuration, min) | 0 | How long the price must stay at or above the threshold before discharging starts. 0 = straight away |
+| Hold Time | Number (configuration, min) | 10 | How long the price must stay below the threshold before discharging stops. Keeps it going through short dips |
+| Discharge Power | Number (configuration, kW) | 10 | Discharge power limit, 0–30 kW. **0 means no limit** |
+| Session Duration | Number (configuration, min) | 30 | Length of each manual control session. Also the safety backstop, see below |
+| Minimum SOC | Number (configuration, %) | 20 | Stops at or below this SOC, and doesn't start again until the next spike |
+| Take Over Manual Control | Switch (configuration) | Off | What to do if you've started manual control yourself (in the app or HA) when a spike starts. **Off: leave it alone** and start once it ends, if the spike is still on. On: stop it and start discharging |
 
 The threshold has `price_entity` and `current_price` attributes. Both binary sensors have these attributes: `current_price`, `threshold`, `soc`, `spike_started`, `hold_ends` and `last_stop_reason`.
 
@@ -369,7 +369,7 @@ You can test with your real price and SOC sensors. Move the threshold to force a
 
 1. Turn the feature on in Configure with your real price and SOC entities.
 2. Set **Discharge Power** to `1` kW, **Session Duration** to `5` min and **Hold Time** to `2` min, then turn on the **Price Spike Export** switch.
-3. **Force a spike:** set **Threshold** below the current price, for example `-1000`. Within a few seconds, **Price Spike Discharging** turns on, the **Manual Control** sensor shows Discharging, and the mySigen app shows the manual control.
+3. **Force a spike:** set **Threshold** below the current price, for example `-1000`. Within a few seconds, **Discharging** turns on, the **Manual Control** sensor shows Discharging, and the mySigen app shows the manual control.
 4. **End it:** set **Threshold** far above any real price, for example `100000`. After the hold time, it stops and the station goes back to its Energy Profile.
 5. When you're happy, set your real threshold, power, session duration and hold time.
 
