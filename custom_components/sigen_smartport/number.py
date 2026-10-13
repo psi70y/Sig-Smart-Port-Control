@@ -6,7 +6,7 @@ import logging
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -224,13 +224,15 @@ class SigenPriceSpikeThresholdNumber(SigenPriceSpikeNumber):
 
     def __init__(self, coordinator, entry: ConfigEntry):
         super().__init__(coordinator, entry, "price_spike_threshold", "Price Spike Threshold",
-                         "mdi:cash-alert", "threshold", None,
+                         "mdi:cash", "threshold", coordinator.price_spike.price_unit,
                          SPIKE_THRESHOLD_MIN, SPIKE_THRESHOLD_MAX, 0.001)
 
-    @property
-    def native_unit_of_measurement(self):
-        # The price entity may load after this one, so follow it.
-        return self._controller.price_unit
+    @callback
+    def _update_from_controller(self) -> None:
+        # The price entity may load after this one, so follow its unit. Set
+        # through the _attr_ so HA's cached unit is refreshed too.
+        if self._controller.price_unit != self._attr_native_unit_of_measurement:
+            self._attr_native_unit_of_measurement = self._controller.price_unit
 
     @property
     def extra_state_attributes(self):

@@ -238,6 +238,9 @@ class PriceSpikeController:
         self.session_end = state.get("session_end")
         self.spike_started = state.get("spike_started")
         self.last_stop_reason = state.get("last_stop_reason")
+        # Read now so the threshold has the price unit from its first state.
+        self._read_soc()
+        self._read_price()
         _LOGGER.info(
             "Sigenergy Cloud Control: Price Spike Export loaded - %s, threshold %s, start delay %d min, "
             "hold %d min, %s, sessions of %d min, minimum SOC %d%%, take over manual control %s, "

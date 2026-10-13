@@ -26,7 +26,7 @@ class SigenPriceSpikeActiveSensor(SigenPriceSpikeEntity, BinarySensorEntity):
     delay). Off during the hold time after a dip."""
 
     _attr_name = "Price Spike Active"
-    _attr_icon = "mdi:cash-alert"
+    _attr_icon = "mdi:flash-alert"
 
     def __init__(self, coordinator, entry: ConfigEntry):
         super().__init__(coordinator, entry, "price_spike_active")
