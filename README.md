@@ -28,6 +28,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **No more YAML** — setup is now a guided UI wizard (Settings → Integrations → Add Integration). No editing `configuration.yaml`, no restart-to-apply-changes for adding a device.
 - **HACS-installable** — add as a HACS custom repository instead of manually copying files.
 - **Instant Manual Control** — start Charging, Discharging, Hold Battery or Self-Consumption for 1–1440 minutes, from the UI, a dashboard button or an automation, and see what's running and when it ends. See [Instant Manual Control](#instant-manual-control).
+- **Price Spike Export** — discharge the battery to the grid while a price entity from any other integration is at or above a threshold, and hand control back when the spike ends. Off by default. See [Price Spike Export](#price-spike-export).
 - **AC EV Charger support** — read charging status, current and energy totals, and change Charging Mode, Battery Boost, Grid Charging and their limits from HA.
 - **Devices, not loose entities** — the switch and mode selector for each Smart Port load are grouped together as one Device in the HA UI; the Energy Profile selector gets its own Station-level device.
 
@@ -39,6 +40,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Mode selector**: switch between **Manual** and **Auto (Sig Schedule)**, synced with the cloud.
 - **Energy Profile selector**: switch between built-in system modes and your own saved custom profiles, synced with the cloud.
 - **Instant Manual Control**: start or stop the mySigen app's Instant Manual Control, with a status sensor that also shows manual control started from the app, plus actions for automations — see [Instant Manual Control](#instant-manual-control).
+- **Price Spike Export** (optional): force-discharge during price spikes, using any price entity — see [Price Spike Export](#price-spike-export).
 - **Refresh Energy Profiles button**: manually re-fetch the profile/mode option list on demand — useful right after creating a new custom profile in the mySigen app.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
 - **Configurable Energy Profile list refresh**: how often the full list of selectable profiles/modes is automatically re-checked in the background (default 30 days) — a safety net alongside the manual button.
@@ -80,7 +82,7 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
 3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID, and how often the full Energy Profile list is auto-refreshed — default `30` days) — only change these if you know you need to.
 4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
 
-The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Cloud Control → Configure**, without needing to remove and re-add the device.
+The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Connection settings**, without needing to remove and re-add the device. On the entry that owns the station's Energy Profile, Configure also has a **Price Spike Export** page.
 
 ### Capturing your credentials
 
@@ -290,6 +292,81 @@ entities:
 
 ---
 
+## Price Spike Export
+
+Discharges the battery to the grid while electricity prices spike, then hands control back when the spike is over. It uses [Instant Manual Control](#instant-manual-control) under the hood: when the price reaches your threshold, it starts **Discharging** at the power you set, and stops it again afterwards.
+
+**It's off by default.** Nothing changes for existing users until it's turned on in **Configure**.
+
+### What you need
+
+- **A price entity from another integration.** Any numeric sensor works. This integration doesn't read prices itself, so it works with any market or retailer. For example:
+  - **Australia:** [AEMO NEM](https://github.com/cabberley/HA_AemoNemData) wholesale spot price, or Amber Electric
+  - **Europe / UK:** Nord Pool, ENTSO-E, EPEX Spot, Tibber or Octopus Energy
+- **A battery SOC entity (%)**, for example from a [local Modbus integration](#using-it-alongside-a-local-modbus-integration). The Sigenergy cloud API this integration uses doesn't provide SOC, so it has to come from somewhere else. Price Spike Export won't start without a valid SOC reading.
+
+**The threshold is in your price entity's own unit and currency.** If the entity reports $/kWh, a threshold of `1.0` means $1.00/kWh. If it reports EUR/MWh, use EUR/MWh.
+
+> **A price threshold is a proxy, not an official signal.** Retailer events such as critical peak, VPP or demand response are often triggered by high wholesale prices, but your retailer decides when they happen and what they pay. Compare your threshold with your retailer's actual event records (for example, which intervals your bill credited) and adjust it until they match.
+
+### Turning it on
+
+1. Go to **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Price Spike Export**. On a station with several entries (for example two Smart Port loads), it's on the entry that owns the station's Energy Profile.
+2. Tick **Turn on Price Spike Export**, choose the **price entity** and the **battery SOC entity**, and optionally a **notify action** (for example `notify.mobile_app_your_phone`).
+3. Submit. The entities below appear on the **Sigen Station** device. Turning the feature off in Configure removes them again, and stops a discharge session it started.
+4. Check the settings, then turn on the **Price Spike Export** switch to arm it.
+
+### Entities
+
+All settings can be changed from a dashboard at any time, and are saved to disk so they survive restarts.
+
+| Entity | Type | Default | What it does |
+|---|---|---|---|
+| Price Spike Export | Switch | Off | Arms the feature. Turning it off stops a discharge session it started |
+| Price Spike Take Over Manual Control | Switch | Off | What to do if you've started manual control yourself (in the app or HA) when a spike starts. **Off: leave it alone** and start once it ends, if the spike is still on. On: stop it and start discharging |
+| Price Spike Threshold | Number | 1.0 | Price at or above which a spike starts, in the price entity's unit |
+| Price Spike Start Delay | Number (min) | 0 | How long the price must stay at or above the threshold before discharging starts. 0 = straight away |
+| Price Spike Hold Time | Number (min) | 10 | How long the price must stay below the threshold before discharging stops. Keeps it going through short dips |
+| Price Spike Discharge Power | Number (kW) | 10 | Discharge power limit, 0–30 kW. **0 means no limit** |
+| Price Spike Session Duration | Number (min) | 30 | Length of each manual control session. Also the safety backstop, see below |
+| Price Spike Minimum SOC | Number (%) | 20 | Stops at or below this SOC, and doesn't start again until the next spike |
+| Price Spike Active | Binary sensor | | On while the price is at or above the threshold (after the start delay) |
+| Price Spike Discharging | Binary sensor | | On only while a session started by Price Spike Export is running, never for one you started |
+
+Both binary sensors have these attributes: `current_price`, `threshold`, `soc`, `spike_started`, `hold_ends` and `last_stop_reason`.
+
+### How it behaves
+
+- **Start:** when the price reaches the threshold (and stays there for the start delay), the switch is on and SOC is above the minimum, it starts Discharging for the session duration.
+- **Short dips don't stop it.** When the price falls below the threshold, the hold time starts. If the price comes back up before it ends, discharging just carries on. Real spikes are often choppy, with high and low 5-minute intervals alternating.
+- **Long spikes:** when a session runs out and the spike is still on (or in its hold time), a new session starts. There can be a gap of up to about a minute between sessions.
+- **Stop:** when the hold time ends, SOC reaches the minimum, or you turn the switch off. It only ever stops a session it started itself.
+- **Your own manual control is respected.** If you stop or replace a Price Spike Export session in the mySigen app, it's left alone for the rest of that spike.
+- **When it takes over** your manual control (Take Over switch on), your session isn't brought back afterwards. When the spike ends, the station goes back to its Energy Profile.
+- **Unavailable price or SOC** counts as "no spike" (price) or "don't start" (SOC), and a warning is logged once.
+- **Restarts:** it remembers whether the running session is its own, so after a restart it carries on, and never stops a session it didn't start.
+- **Safety backstop:** every session has a fixed length (the session duration), so if Home Assistant stops, discharging ends by itself when the session does.
+- Every decision is logged at INFO level with the price, threshold, SOC and reason.
+
+### Events and notifications
+
+- `sigen_smartport_price_spike_export_started` fires when discharging starts. Data: `station_id`, `price`, `threshold`, `soc`, `power_kw`, `duration_min` and `rearm` (true for the follow-on sessions of a long spike).
+- `sigen_smartport_price_spike_export_stopped` fires when it stops, with the same data plus `reason`: `price_below_threshold`, `soc_at_minimum` or `switched_off`.
+- If you set a notify action, it's called with a title and message when discharging starts (once per spike) and stops.
+
+### Test it safely
+
+Try it with a made-up price before trusting it with a real one:
+
+1. Create two **Number** helpers (**Settings → Devices & Services → Helpers**), for example `input_number.test_price` (0–20, step 0.01) and `input_number.test_soc` (0–100). Set the SOC to something realistic, like 80.
+2. In Configure → Price Spike Export, choose them as the price and SOC entities. Price and SOC accept number helpers for exactly this reason.
+3. Set **Discharge Power** to `1` kW, **Session Duration** to `5` min and **Hold Time** to `2` min, then turn on the **Price Spike Export** switch.
+4. Set the test price above the threshold. Within a few seconds, **Price Spike Discharging** turns on, the **Manual Control** sensor shows Discharging, and the mySigen app shows the manual control.
+5. Set the test price below the threshold. After the hold time, it stops and the station goes back to its Energy Profile.
+6. When you're happy, switch the entities in Configure to your real price and SOC sensors and set your real power, duration and threshold.
+
+---
+
 ## AC EV Charger
 
 If you have a Sigenergy AC EV Charger on the same station, it can be added as its own device. Tested so far with an EVAC 22 on the EU region.
@@ -340,7 +417,7 @@ Many Sigenergy owners also run a local Modbus integration, such as [Sigenergy ES
 |---|---|
 | Smart Port loads (on/off, Manual/Auto) | ✅ Yes. Modbus only reads smart load consumption |
 | AC EV Charger settings (Charging Mode, Battery Boost, Grid Charging) | ✅ Yes. Modbus covers different charger controls (start/stop, output current) |
-| Energy Profile and Instant Manual Control | ⚠️ Not together with Remote EMS (see below) |
+| Energy Profile, Instant Manual Control and Price Spike Export | ⚠️ Not together with Remote EMS (see below) |
 
 **Recommendation: use only one thing to control what the plant does.** Don't use this integration's **Energy Profile** or **Instant Manual Control** while **Remote EMS** is enabled through a Modbus integration. Both tell the battery and inverter what to do, so they would override each other. Remote EMS takes the plant off its Energy Profile until Remote EMS is switched off again. Instant Manual Control expects the Energy Profile to take over again when it ends.
 
