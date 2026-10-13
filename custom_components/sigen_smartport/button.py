@@ -84,7 +84,8 @@ class _SigenManualControlButton(ButtonEntity):
 class SigenStartManualControlButton(_SigenManualControlButton):
     """Start Instant Manual Control with the current Action, Duration and
     Power Limit settings. If manual control is already running, it's
-    stopped first and replaced."""
+    replaced only when the Replace Running Manual Control switch is on;
+    otherwise the press is refused."""
 
     _attr_name = "Start Manual Control"
     _attr_icon = "mdi:play"
@@ -96,7 +97,7 @@ class SigenStartManualControlButton(_SigenManualControlButton):
         settings = self.coordinator.manual_settings
         await async_start_manual_control(
             self.hass, self.coordinator, settings.action, settings.duration, settings.power_limit,
-            replace_running=True,
+            replace_running=settings.replace_running,
         )
 
 

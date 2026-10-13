@@ -18,7 +18,7 @@ from .const import (
     AC_FIELD_MAX_GRID_POWER,
     AC_FALLBACK_GRID_POWER_KW,
 )
-from .entity import SigenAcChargerEntity
+from .entity import SigenAcChargerEntity, SigenManualControlSettingEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,12 +28,17 @@ async def async_setup_entry(
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
     if entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER:
-        async_add_entities([
+        entities = [
             SigenAcChargerBatteryBoostSwitch(coordinator, entry),
             SigenAcChargerGridChargingSwitch(coordinator, entry),
-        ])
-        return
-    async_add_entities([SigenSmartPortControlSwitch(coordinator, entry)])
+        ]
+    else:
+        entities = [SigenSmartPortControlSwitch(coordinator, entry)]
+    # Station-wide, so only the entry that owns the station's Energy
+    # Profile creates it (see _claim_station_profile in __init__.py).
+    if coordinator.owns_station_profile:
+        entities.append(SigenManualControlReplaceRunningSwitch(coordinator, entry))
+    async_add_entities(entities)
 
 
 class SigenSmartPortControlSwitch(CoordinatorEntity, SwitchEntity):
@@ -121,3 +126,33 @@ class SigenAcChargerGridChargingSwitch(SigenAcChargerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self._write(**{AC_FIELD_GRID_CHARGING: False})
+
+
+class SigenManualControlReplaceRunningSwitch(SigenManualControlSettingEntity, SwitchEntity):
+    """Whether Start Manual Control may replace a manual control that's
+    already running (for example one started in the mySigen app). Off by
+    default: Start is refused until the running one ends or is stopped."""
+
+    _attr_name = "Replace Running Manual Control"
+    _attr_icon = "mdi:swap-horizontal"
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator, entry, "manual_control_replace_running")
+
+    @property
+    def is_on(self) -> bool:
+        return self._settings.replace_running
+
+    async def async_turn_on(self, **kwargs):
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set(False)
+
+    async def _set(self, on: bool) -> None:
+        await self._settings.async_set(replace_running=on)
+        self.async_write_ha_state()
+        _LOGGER.info(
+            "Sigenergy Cloud Control: Start Manual Control will now %s a running manual control",
+            "replace" if on else "refuse to replace",
+        )

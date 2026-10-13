@@ -149,12 +149,13 @@ These are added to the **Sigen Station** device, next to the Energy Profile sele
 | Manual Control Action | Select | Charging, Discharging, Hold Battery or Self-Consumption |
 | Manual Control Duration | Number (min) | How long to run, 1–1440 minutes (24 hours). Default 30 |
 | Manual Control Power Limit | Number (kW) | Maximum charge or discharge power, 0–30 kW. **0 means no limit.** Only used for Charging and Discharging |
-| Start Manual Control | Button | Starts manual control with the three settings above. Replaces any manual control that's already running |
+| Start Manual Control | Button | Starts manual control with the three settings above |
+| Replace Running Manual Control | Switch | Off (default): Start is refused while manual control is already running. On: Start stops the running one and replaces it |
 | Stop Manual Control | Button | Ends manual control now |
 | Manual Control | Sensor | `Off`, or the action that's running. The raw mode code is in the `mode_code` attribute |
 | Manual Control Ends | Sensor (timestamp) | When the running manual control ends (shown as e.g. "in 23 minutes"). Unknown while it's off |
 
-- **Action, Duration and Power Limit are settings for the next start.** Changing them sends nothing to Sigenergy. Press **Start Manual Control** to send them.
+- **Action, Duration, Power Limit and Replace Running Manual Control are settings for the next start.** Changing them sends nothing to Sigenergy. Press **Start Manual Control** to send them.
 - **These settings are saved to disk** and survive Home Assistant restarts. Sigenergy doesn't give them back, so the integration keeps its own copy.
 - **The two sensors read the real state from Sigenergy**, so manual control started or stopped in the mySigen app shows up too, at the next poll.
 - **It changes to Off when the time is up.** Shortly after the end time, the integration checks again so the sensors update, instead of waiting for the next regular poll.
@@ -281,8 +282,8 @@ entities:
 
 - **Charging with no power limit can draw a lot from the grid.** Set a power limit if that matters for your tariff or connection.
 - **Starting while manual control is already running:**
-  - **The Start Manual Control button replaces it.** The integration stops the running one, checks with Sigenergy that it has stopped (a few seconds), then starts the new one. If Sigenergy doesn't confirm the stop in time, the new one isn't started, the station stays on its Energy Profile, and Home Assistant shows an error.
-  - **The `start_manual_control` action refuses by default**, with a message saying what's running and until when. Add `replace_running: true` to replace it instead, the same way the button does.
+  - **By default, Start is refused**, from the button and from the action, with a message saying what's running and until when. This protects manual control you started in the mySigen app.
+  - **To replace it instead**, turn on the **Replace Running Manual Control** switch (for the button), or add `replace_running: true` (for the action). The integration then stops the running one, checks with Sigenergy that it has stopped (a few seconds), then starts the new one. If Sigenergy doesn't confirm the stop in time, the new one isn't started, the station stays on its Energy Profile, and Home Assistant shows an error.
   - Just before starting, the integration re-checks the status with Sigenergy, so this also catches manual control started in the mySigen app since the last poll.
 - **If Sigenergy rejects a start or stop**, Home Assistant shows an error and the details are logged.
 - **Don't combine this with Remote EMS** from a local Modbus integration. See [Using it alongside a local Modbus integration](#using-it-alongside-a-local-modbus-integration).

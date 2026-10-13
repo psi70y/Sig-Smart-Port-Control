@@ -48,13 +48,17 @@ def manual_control_store(hass: HomeAssistant, station_id) -> Store:
 
 
 class ManualControlSettings:
-    """Action / duration / power limit used by the next Start."""
+    """Action / duration / power limit used by the next Start, and whether
+    the Start button may replace a manual control that's already running."""
 
     def __init__(self, hass: HomeAssistant, station_id):
         self._store = manual_control_store(hass, station_id)
         self.action = MANUAL_ACTION_SELF_CONSUMPTION
         self.duration = MANUAL_DURATION_DEFAULT
         self.power_limit = MANUAL_POWER_LIMIT_MIN  # 0 = no limit
+        # Off by default, so manual control started in the mySigen app isn't
+        # overwritten by an accidental press of Start.
+        self.replace_running = False
 
     async def async_load(self) -> None:
         saved = await self._store.async_load()
@@ -70,9 +74,14 @@ class ManualControlSettings:
             self.power_limit = _clamp(float(saved.get("power_limit")), MANUAL_POWER_LIMIT_MIN, MANUAL_POWER_LIMIT_MAX)
         except (TypeError, ValueError):
             pass
+        # Missing in files saved before this setting existed - keep the default.
+        if isinstance(saved.get("replace_running"), bool):
+            self.replace_running = saved["replace_running"]
         _LOGGER.info(
-            "Sigenergy Cloud Control: restored manual control settings from disk (%s, %d min, %s)",
+            "Sigenergy Cloud Control: restored manual control settings from disk (%s, %d min, %s, %s)",
             self.action, self.duration, describe_power_limit(self.action, self.power_limit),
+            "Start replaces running manual control" if self.replace_running
+            else "Start refused while manual control is running",
         )
 
     async def async_set(self, **changes) -> None:
@@ -83,6 +92,7 @@ class ManualControlSettings:
             "action": self.action,
             "duration": self.duration,
             "power_limit": self.power_limit,
+            "replace_running": self.replace_running,
         })
         _LOGGER.debug("Sigenergy Cloud Control: saved manual control settings to disk: %s", changes)
 
