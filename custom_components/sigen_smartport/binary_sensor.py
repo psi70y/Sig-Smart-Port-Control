@@ -1,4 +1,4 @@
-"""Binary sensor platform - Price Spike Export status on the station device
+"""Binary sensor platform - Price Spike Export status on its own device
 (only when the feature is turned on in Configure)."""
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -25,7 +25,7 @@ class SigenPriceSpikeActiveSensor(SigenPriceSpikeEntity, BinarySensorEntity):
     """On while the price is at or above the threshold (after the start
     delay). Off during the hold time after a dip."""
 
-    _attr_name = "Price Spike Active"
+    _attr_name = "Active"
     _attr_icon = "mdi:flash-alert"
 
     def __init__(self, coordinator, entry: ConfigEntry):
@@ -44,7 +44,7 @@ class SigenPriceSpikeDischargingSensor(SigenPriceSpikeEntity, BinarySensorEntity
     """On only while a manual control session started by Price Spike Export
     is running - never for one you started yourself."""
 
-    _attr_name = "Price Spike Discharging"
+    _attr_name = "Discharging"
     _attr_icon = "mdi:home-battery-outline"
 
     def __init__(self, coordinator, entry: ConfigEntry):

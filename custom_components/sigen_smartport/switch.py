@@ -4,6 +4,7 @@ import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -41,10 +42,12 @@ async def async_setup_entry(
     # Only when Price Spike Export is turned on in Configure.
     if coordinator.price_spike:
         entities += [
-            SigenPriceSpikeSwitch(coordinator, entry, "price_spike_export", "Price Spike Export",
+            # The device's main switch, so it takes the device's name.
+            SigenPriceSpikeSwitch(coordinator, entry, "price_spike_export", None,
                                   "mdi:transmission-tower-export", "enabled"),
             SigenPriceSpikeSwitch(coordinator, entry, "price_spike_take_over",
-                                  "Price Spike Take Over Manual Control", "mdi:swap-horizontal", "take_over"),
+                                  "Take Over Manual Control", "mdi:swap-horizontal", "take_over",
+                                  EntityCategory.CONFIG),
         ]
     async_add_entities(entities)
 
@@ -170,10 +173,12 @@ class SigenPriceSpikeSwitch(SigenPriceSpikeEntity, SwitchEntity):
     """Price Spike Export on/off, and whether it may take over a manual
     control the user started (off: it waits for that to end)."""
 
-    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str, name: str, icon: str, setting: str):
+    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str, name: str | None, icon: str,
+                 setting: str, entity_category: EntityCategory | None = None):
         super().__init__(coordinator, entry, unique_suffix)
         self._attr_name = name
         self._attr_icon = icon
+        self._attr_entity_category = entity_category
         self._setting = setting
 
     @property

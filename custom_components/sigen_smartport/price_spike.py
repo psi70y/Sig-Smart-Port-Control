@@ -25,7 +25,7 @@ one we started (within SESSION_MATCH_TOLERANCE_SECONDS) is treated as ours,
 and only ours is ever stopped. That flag is saved to disk, so after a
 restart a session we started is picked up again, and anything else is left
 alone. A manual control the user started is waited out, or replaced only if
-the Price Spike Take Over Manual Control switch is on. If the user stops or
+the Take Over Manual Control switch is on. If the user stops or
 replaces our session, we leave it for the rest of that spike.
 """
 
@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
@@ -118,15 +119,27 @@ def price_spike_store(hass: HomeAssistant, station_id) -> Store:
 
 
 @callback
-def async_remove_spike_entities(hass: HomeAssistant, station_id) -> None:
-    """Remove the feature's entities from the registry, so turning it off in
-    Configure doesn't leave them behind as unavailable."""
+def async_find_device(hass: HomeAssistant, entry_id: str, identifier: str):
+    """This entry's device with the given identifier, or None. Uses only
+    registry calls that work on every supported HA version."""
+    for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id):
+        if (DOMAIN, identifier) in device.identifiers:
+            return device
+    return None
+
+
+@callback
+def async_remove_spike_entities(hass: HomeAssistant, entry_id: str, station_id) -> None:
+    """Remove the feature's entities and device from the registry, so turning
+    it off in Configure doesn't leave them behind as unavailable."""
     ent_reg = er.async_get(hass)
     for platform, suffixes in SPIKE_ENTITY_SUFFIXES.items():
         for suffix in suffixes:
             entity_id = ent_reg.async_get_entity_id(platform, DOMAIN, f"{station_id}_{suffix}")
             if entity_id:
                 ent_reg.async_remove(entity_id)
+    if device := async_find_device(hass, entry_id, f"price_spike_{station_id}"):
+        dr.async_get(hass).async_remove_device(device.id)
 
 
 async def async_stop_orphaned_session(hass: HomeAssistant, coordinator, station_id) -> None:

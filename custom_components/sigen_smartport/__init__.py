@@ -66,6 +66,7 @@ from .manual_control import (
 )
 from .price_spike import (
     PriceSpikeController,
+    async_find_device,
     async_remove_spike_entities,
     async_stop_orphaned_session,
     price_spike_store,
@@ -447,7 +448,7 @@ async def _async_setup_price_spike(hass: HomeAssistant, entry: ConfigEntry, coor
     options = entry.options
     if not (options.get(CONF_SPIKE_ENABLED) and options.get(CONF_SPIKE_PRICE_ENTITY)
             and options.get(CONF_SPIKE_SOC_ENTITY)):
-        async_remove_spike_entities(hass, station_id)
+        async_remove_spike_entities(hass, entry.entry_id, station_id)
         await async_stop_orphaned_session(hass, coordinator, station_id)
         return
     controller = PriceSpikeController(
@@ -458,6 +459,24 @@ async def _async_setup_price_spike(hass: HomeAssistant, entry: ConfigEntry, coor
     )
     await controller.async_load()
     coordinator.price_spike = controller
+
+
+@callback
+def _has_spike_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    return async_find_device(hass, entry.entry_id, f"price_spike_{entry.data[CONF_STATION_ID]}") is not None
+
+
+@callback
+def _copy_station_area(hass: HomeAssistant, entry: ConfigEntry, had_spike_device: bool) -> None:
+    """When the Price Spike Export device has just been created, put it in
+    the station's area, so its entities keep the area they had before."""
+    if had_spike_device or not entry.data.get(CONF_STATION_ID):
+        return
+    station_id = entry.data[CONF_STATION_ID]
+    device = async_find_device(hass, entry.entry_id, f"price_spike_{station_id}")
+    station = async_find_device(hass, entry.entry_id, f"station_{station_id}")
+    if device and station and station.area_id and device.area_id is None:
+        dr.async_get(hass).async_update_device(device.id, area_id=station.area_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -547,8 +566,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
         await _async_setup_manual_control(hass, entry, ac_coordinator)
         await _async_setup_price_spike(hass, entry, ac_coordinator)
+        had_spike_device = _has_spike_device(hass, entry)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
         if ac_coordinator.price_spike:
+            _copy_station_area(hass, entry, had_spike_device)
             ac_coordinator.price_spike.async_start()
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
@@ -575,10 +596,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_setup_manual_control(hass, entry, coordinator)
     await _async_setup_price_spike(hass, entry, coordinator)
+    had_spike_device = _has_spike_device(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_SMART_PORT)
     # Start reacting to prices only once its entities exist.
     if coordinator.price_spike:
+        _copy_station_area(hass, entry, had_spike_device)
         coordinator.price_spike.async_start()
 
     # If the scan interval is changed later via the "Configure" button on

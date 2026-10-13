@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -54,19 +54,19 @@ async def async_setup_entry(
     if coordinator.price_spike:
         entities += [
             SigenPriceSpikeThresholdNumber(coordinator, entry),
-            SigenPriceSpikeNumber(coordinator, entry, "price_spike_start_delay", "Price Spike Start Delay",
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_start_delay", "Start Delay",
                                   "mdi:timer-play-outline", "start_delay", UnitOfTime.MINUTES,
                                   0, SPIKE_START_DELAY_MAX, 1),
-            SigenPriceSpikeNumber(coordinator, entry, "price_spike_hold_time", "Price Spike Hold Time",
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_hold_time", "Hold Time",
                                   "mdi:timer-pause-outline", "hold_time", UnitOfTime.MINUTES,
                                   0, SPIKE_HOLD_TIME_MAX, 1),
-            SigenPriceSpikeNumber(coordinator, entry, "price_spike_discharge_power", "Price Spike Discharge Power",
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_discharge_power", "Discharge Power",
                                   "mdi:flash", "power", UnitOfPower.KILO_WATT,
                                   MANUAL_POWER_LIMIT_MIN, MANUAL_POWER_LIMIT_MAX, 0.1, NumberDeviceClass.POWER),
-            SigenPriceSpikeNumber(coordinator, entry, "price_spike_session_duration", "Price Spike Session Duration",
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_session_duration", "Session Duration",
                                   "mdi:timer-outline", "duration", UnitOfTime.MINUTES,
                                   MANUAL_DURATION_MIN, MANUAL_DURATION_MAX, 1),
-            SigenPriceSpikeNumber(coordinator, entry, "price_spike_min_soc", "Price Spike Minimum SOC",
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_min_soc", "Minimum SOC",
                                   "mdi:battery-low", "min_soc", PERCENTAGE, 0, 100, 1),
         ]
     async_add_entities(entities)
@@ -190,9 +190,10 @@ class SigenManualControlPowerLimitNumber(SigenManualControlSettingEntity, Number
 
 class SigenPriceSpikeNumber(SigenPriceSpikeEntity, NumberEntity):
     """One Price Spike Export setting. Saved to disk and used from the next
-    decision on."""
+    decision on. Listed under Configuration on the device page."""
 
     _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str, name: str, icon: str,
                  setting: str, unit, low, high, step, device_class=None):
@@ -223,7 +224,7 @@ class SigenPriceSpikeThresholdNumber(SigenPriceSpikeNumber):
     unit (e.g. $/kWh or EUR/MWh)."""
 
     def __init__(self, coordinator, entry: ConfigEntry):
-        super().__init__(coordinator, entry, "price_spike_threshold", "Price Spike Threshold",
+        super().__init__(coordinator, entry, "price_spike_threshold", "Threshold",
                          "mdi:cash", "threshold", coordinator.price_spike.price_unit,
                          SPIKE_THRESHOLD_MIN, SPIKE_THRESHOLD_MAX, 0.001)
 

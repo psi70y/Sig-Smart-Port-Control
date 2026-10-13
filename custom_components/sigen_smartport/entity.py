@@ -73,8 +73,22 @@ class SigenManualControlSettingEntity:
         return self.coordinator.manual_settings
 
 
+def price_spike_device_info(station_id) -> DeviceInfo:
+    """Price Spike Export gets its own device, so its entities have their
+    own page: the on/off switch under Controls, its status under Sensors and
+    its settings under Configuration. Not linked to the station with
+    via_device - that's deprecated from HA 2026.10, and its replacements
+    don't exist in the older versions this integration supports."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"price_spike_{station_id}")},
+        name=f"Sigen Station {station_id} Price Spike Export",
+        manufacturer="Sigenergy",
+        model="Price Spike Export",
+    )
+
+
 class SigenPriceSpikeEntity:
-    """Base for the Price Spike Export entities on the station device. They
+    """Base for the Price Spike Export entities on its own device. They
     show the PriceSpikeController's settings and state, and update when it
     tells them to."""
 
@@ -86,7 +100,7 @@ class SigenPriceSpikeEntity:
         self._controller = coordinator.price_spike
         station_id = entry.data[CONF_STATION_ID]
         self._attr_unique_id = f"{station_id}_{unique_suffix}"
-        self._attr_device_info = station_device_info(station_id)
+        self._attr_device_info = price_spike_device_info(station_id)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
