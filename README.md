@@ -307,6 +307,14 @@ Discharges the battery to the grid while electricity prices spike, then hands co
 
 **The threshold is in your price entity's own unit and currency.** If the entity reports $/kWh, a threshold of `1.0` means $1.00/kWh. If it reports EUR/MWh, use EUR/MWh. The threshold shows the price entity's unit. Some price entities don't report one (check its `unit_of_measurement` attribute in **Developer Tools → States**). For those, enter the unit in **Price unit** in Configure so it's shown on the threshold.
 
+> ⚠️ **Choosing the right price entity is critical. The wrong one can trigger real exports at the wrong time.** The integration can't tell whether an entity is really a price. It only compares the entity's number with your threshold, and starts discharging when that number is at or above it. Price integrations often have several similar-looking entities. For example, the AEMO NEM integration has both `sensor.aemo_nem_nsw1_current_5min_period_price` (the price, in $/kWh) and `sensor.aemo_nem_nsw1_periods_of_current_30min` (a count of periods, often 3 or more). With the second one and a threshold of `1.0`, Price Spike Export would treat every moment as a spike and discharge the battery for as long as it's armed. Picking an entity in the wrong unit (for example $/MWh instead of $/kWh) does the same.
+>
+> **Before you arm it, check that:**
+> - the **Price Spike Threshold** shows the unit you expect (for example $/kWh), and
+> - its `price_entity` and `current_price` attributes (in **Developer Tools → States**) show the right entity, with a value that matches the current price in your retailer's app or on the market operator's website.
+>
+> If the threshold shows no unit at all, the entity may not be a price. Double-check it before entering a **Price unit** by hand.
+
 > **A price threshold is a proxy, not an official signal.** Retailer events such as critical peak, VPP or demand response are often triggered by high wholesale prices, but your retailer decides when they happen and what they pay. Compare your threshold with your retailer's actual event records (for example, which intervals your bill credited) and adjust it until they match.
 
 ### Turning it on
@@ -314,7 +322,8 @@ Discharges the battery to the grid while electricity prices spike, then hands co
 1. Go to **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Price Spike Export**. On a station with several entries (for example two Smart Port loads), it's on the entry that owns the station's Energy Profile.
 2. Tick **Turn on Price Spike Export**, choose the **price entity** and the **battery SOC entity**, and optionally a **price unit** (only needed if the price entity doesn't report one) and a **notify action** (for example `notify.mobile_app_your_phone`).
 3. Submit. The entities below appear on the **Sigen Station** device. Turning the feature off in Configure removes them again, and stops a discharge session it started.
-4. Check the settings, then turn on the **Price Spike Export** switch to arm it.
+4. **Check the price entity is the right one** (see the warning above): the threshold shows the expected unit, and its `current_price` attribute matches the actual current price.
+5. Check the settings, then turn on the **Price Spike Export** switch to arm it.
 
 ### Entities
 
