@@ -13,6 +13,11 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    TextSelector,
+)
 
 # ConfigFlowResult arrived in HA 2024.4; older versions only have FlowResult.
 try:
@@ -34,6 +39,11 @@ from .const import (
     CONF_USER_DEVICE_ID,
     CONF_SCAN_INTERVAL,
     CONF_PROFILE_REFRESH_DAYS,
+    CONF_SPIKE_ENABLED,
+    CONF_SPIKE_NOTIFY_ACTION,
+    CONF_SPIKE_PRICE_ENTITY,
+    CONF_SPIKE_SOC_ENTITY,
+    SPIKE_OPTION_KEYS,
     DEFAULT_BASE_URL,
     DEFAULT_AUTH_HEADER,
     DEFAULT_USER_DEVICE_ID,
@@ -264,19 +274,37 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return SigenSmartPortOptionsFlow(config_entry)
 
 
+# Price and SOC can come from any integration. input_number is allowed too,
+# so the feature can be tested safely with a made-up price.
+_NUMERIC_ENTITY_SELECTOR = EntitySelector(EntitySelectorConfig(domain=["sensor", "input_number"]))
+
+
 class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
     """Lets region/poll interval/etc be changed later via 'Configure'
-    without deleting and re-adding the device."""
+    without deleting and re-adding the device, and sets up Price Spike
+    Export on the entry that owns the station."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
 
-    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(title="", data=_resolve_base_url(dict(user_input)))
+    def _owns_station(self) -> bool:
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        return bool(coordinator and coordinator.owns_station_profile)
 
+    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
+        # Price Spike Export is station-wide, so only the entry that owns the
+        # station's entities offers it. The others go straight to settings.
+        if not self._owns_station():
+            return await self.async_step_settings()
+        return self.async_show_menu(step_id="init", menu_options=["settings", "price_spike"])
+
+    async def async_step_settings(self, user_input: dict | None = None) -> ConfigFlowResult:
         entry = self._config_entry
-        is_ac_charger = entry.data.get(CONF_DEVICE_KIND) == DEVICE_KIND_AC_CHARGER
+        if user_input is not None:
+            # Keep the other page's options (Price Spike Export).
+            return self.async_create_entry(
+                title="", data={**entry.options, **_resolve_base_url(dict(user_input))}
+            )
 
         current_region = entry.options.get(CONF_REGION, entry.data.get(CONF_REGION, DEFAULT_REGION))
         current_base_url = entry.options.get(CONF_BASE_URL, entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL))
@@ -301,4 +329,47 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
             vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS))
         )
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))
+        return self.async_show_form(step_id="settings", data_schema=vol.Schema(schema_dict))
+
+    async def async_step_price_spike(self, user_input: dict | None = None) -> ConfigFlowResult:
+        entry = self._config_entry
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            notify_action = (user_input.get(CONF_SPIKE_NOTIFY_ACTION) or "").strip()
+            if user_input.get(CONF_SPIKE_ENABLED):
+                if not user_input.get(CONF_SPIKE_PRICE_ENTITY):
+                    errors[CONF_SPIKE_PRICE_ENTITY] = "price_entity_required"
+                if not user_input.get(CONF_SPIKE_SOC_ENTITY):
+                    errors[CONF_SPIKE_SOC_ENTITY] = "soc_entity_required"
+            if notify_action:
+                domain, _, service = notify_action.partition(".")
+                if not (domain and service and self.hass.services.has_service(domain, service)):
+                    errors[CONF_SPIKE_NOTIFY_ACTION] = "invalid_notify_action"
+            if not errors:
+                # Rebuild this page's options from scratch, so a cleared
+                # field is really cleared, and keep the other page's.
+                options = {k: v for k, v in entry.options.items() if k not in SPIKE_OPTION_KEYS}
+                options[CONF_SPIKE_ENABLED] = bool(user_input.get(CONF_SPIKE_ENABLED))
+                for key in (CONF_SPIKE_PRICE_ENTITY, CONF_SPIKE_SOC_ENTITY):
+                    if user_input.get(key):
+                        options[key] = user_input[key]
+                if notify_action:
+                    options[CONF_SPIKE_NOTIFY_ACTION] = notify_action
+                return self.async_create_entry(title="", data=options)
+
+        schema = vol.Schema({
+            vol.Optional(CONF_SPIKE_ENABLED, default=False): bool,
+            vol.Optional(CONF_SPIKE_PRICE_ENTITY): _NUMERIC_ENTITY_SELECTOR,
+            vol.Optional(CONF_SPIKE_SOC_ENTITY): _NUMERIC_ENTITY_SELECTOR,
+            vol.Optional(CONF_SPIKE_NOTIFY_ACTION): TextSelector(),
+        })
+        # Show what's saved (or what was just typed, if it had an error).
+        suggested = user_input if user_input is not None else {
+            key: entry.options[key] for key in SPIKE_OPTION_KEYS if key in entry.options
+        }
+        return self.async_show_form(
+            step_id="price_spike",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+            errors=errors,
+        )

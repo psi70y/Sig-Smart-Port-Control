@@ -41,6 +41,10 @@ from .const import (
     CONF_USER_DEVICE_ID,
     CONF_SCAN_INTERVAL,
     CONF_PROFILE_REFRESH_DAYS,
+    CONF_SPIKE_ENABLED,
+    CONF_SPIKE_NOTIFY_ACTION,
+    CONF_SPIKE_PRICE_ENTITY,
+    CONF_SPIKE_SOC_ENTITY,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
     DEFAULT_BASE_URL,
@@ -58,6 +62,12 @@ from .manual_control import (
     async_start_manual_control,
     async_stop_manual_control,
     manual_control_store,
+)
+from .price_spike import (
+    PriceSpikeController,
+    async_remove_spike_entities,
+    async_stop_orphaned_session,
+    price_spike_store,
 )
 from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
 
@@ -188,6 +198,9 @@ class _StationCoordinatorMixin:
 
     # ManualControlSettings for the owning entry, None otherwise.
     manual_settings = None
+    # PriceSpikeController when this entry owns the station and Price Spike
+    # Export is turned on in Configure, None otherwise.
+    price_spike = None
     _manual_end_unsub = None
     _manual_lock = None
 
@@ -423,6 +436,28 @@ async def _async_setup_manual_control(hass: HomeAssistant, entry: ConfigEntry, c
     coordinator.manual_settings = settings
 
 
+async def _async_setup_price_spike(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
+    """Start Price Spike Export for the station owner if it's turned on in
+    Configure. If it's off, remove its entities and stop any discharge
+    session it left running."""
+    if not coordinator.owns_station_profile:
+        return
+    station_id = entry.data[CONF_STATION_ID]
+    options = entry.options
+    if not (options.get(CONF_SPIKE_ENABLED) and options.get(CONF_SPIKE_PRICE_ENTITY)
+            and options.get(CONF_SPIKE_SOC_ENTITY)):
+        async_remove_spike_entities(hass, station_id)
+        await async_stop_orphaned_session(hass, coordinator, station_id)
+        return
+    controller = PriceSpikeController(
+        hass, coordinator, station_id,
+        options[CONF_SPIKE_PRICE_ENTITY], options[CONF_SPIKE_SOC_ENTITY],
+        options.get(CONF_SPIKE_NOTIFY_ACTION),
+    )
+    await controller.async_load()
+    coordinator.price_spike = controller
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a Sigen Smart Port load or AC charger from a config entry."""
     _ensure_default_log_level()
@@ -509,7 +544,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
         await _async_setup_manual_control(hass, entry, ac_coordinator)
+        await _async_setup_price_spike(hass, entry, ac_coordinator)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
+        if ac_coordinator.price_spike:
+            ac_coordinator.price_spike.async_start()
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
 
@@ -534,8 +572,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_setup_manual_control(hass, entry, coordinator)
+    await _async_setup_price_spike(hass, entry, coordinator)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_SMART_PORT)
+    # Start reacting to prices only once its entities exist.
+    if coordinator.price_spike:
+        coordinator.price_spike.async_start()
 
     # If the scan interval is changed later via the "Configure" button on
     # the integration entry, reload it so the new interval takes effect
@@ -570,12 +612,16 @@ def _get_profile_refresh_seconds(entry: ConfigEntry) -> float:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry so a changed scan interval takes effect."""
+    """Reload the entry so changed options (scan interval, Price Spike
+    Export settings, ...) take effect."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None and coordinator.price_spike:
+        await coordinator.price_spike.async_shutdown()
     unloaded = await hass.config_entries.async_unload_platforms(entry, _get_platforms(entry))
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -602,3 +648,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         for other in hass.config_entries.async_entries(DOMAIN)
     ):
         await manual_control_store(hass, station_id).async_remove()
+        await price_spike_store(hass, station_id).async_remove()

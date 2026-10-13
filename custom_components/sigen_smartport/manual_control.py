@@ -109,11 +109,11 @@ def describe_power_limit(action: str, power_limit: float | None) -> str:
     return f"power limit {power_limit:.1f} kW"
 
 
-def _is_running(client) -> bool:
+def is_manual_running(client) -> bool:
     return bool(client.manual_enabled and (client.manual_end_time or 0) > time.time())
 
 
-def _describe_running(client) -> tuple[str, str]:
+def describe_running(client) -> tuple[str, str]:
     """(action label, local end time "HH:MM") of the running manual control."""
     running = MANUAL_ACTION_LABELS.get(client.manual_mode, "Manual control")
     end_str = dt_util.as_local(dt_util.utc_from_timestamp(client.manual_end_time)).strftime("%H:%M")
@@ -157,8 +157,8 @@ async def async_start_manual_control(hass: HomeAssistant, coordinator, action: s
         # last known state.
         await hass.async_add_executor_job(client.fetch_manual_control)
         coordinator.async_show_manual_control_state()
-        if _is_running(client):
-            running, end_str = _describe_running(client)
+        if is_manual_running(client):
+            running, end_str = describe_running(client)
             if not replace_running:
                 _LOGGER.warning(
                     "Sigenergy Cloud Control: not starting %s - %s is already running until %s. Stop it first",
@@ -201,7 +201,7 @@ async def _async_stop_and_confirm(hass: HomeAssistant, coordinator) -> None:
         await asyncio.sleep(delay)
         # Only a successful read counts - a failed one leaves the "stopped"
         # state stop_manual_control just set locally.
-        if await hass.async_add_executor_job(client.fetch_manual_control) and not _is_running(client):
+        if await hass.async_add_executor_job(client.fetch_manual_control) and not is_manual_running(client):
             _LOGGER.info("Sigenergy Cloud Control: confirmed manual control stopped, starting the new one")
             return
 

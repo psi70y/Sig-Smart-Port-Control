@@ -23,8 +23,12 @@ from .const import (
     MANUAL_DURATION_MIN,
     MANUAL_POWER_LIMIT_MAX,
     MANUAL_POWER_LIMIT_MIN,
+    SPIKE_HOLD_TIME_MAX,
+    SPIKE_START_DELAY_MAX,
+    SPIKE_THRESHOLD_MAX,
+    SPIKE_THRESHOLD_MIN,
 )
-from .entity import SigenAcChargerEntity, SigenManualControlSettingEntity
+from .entity import SigenAcChargerEntity, SigenManualControlSettingEntity, SigenPriceSpikeEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +49,25 @@ async def async_setup_entry(
         entities += [
             SigenManualControlDurationNumber(coordinator, entry),
             SigenManualControlPowerLimitNumber(coordinator, entry),
+        ]
+    # Only when Price Spike Export is turned on in Configure.
+    if coordinator.price_spike:
+        entities += [
+            SigenPriceSpikeThresholdNumber(coordinator, entry),
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_start_delay", "Price Spike Start Delay",
+                                  "mdi:timer-play-outline", "start_delay", UnitOfTime.MINUTES,
+                                  0, SPIKE_START_DELAY_MAX, 1),
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_hold_time", "Price Spike Hold Time",
+                                  "mdi:timer-pause-outline", "hold_time", UnitOfTime.MINUTES,
+                                  0, SPIKE_HOLD_TIME_MAX, 1),
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_discharge_power", "Price Spike Discharge Power",
+                                  "mdi:flash", "power", UnitOfPower.KILO_WATT,
+                                  MANUAL_POWER_LIMIT_MIN, MANUAL_POWER_LIMIT_MAX, 0.1, NumberDeviceClass.POWER),
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_session_duration", "Price Spike Session Duration",
+                                  "mdi:timer-outline", "duration", UnitOfTime.MINUTES,
+                                  MANUAL_DURATION_MIN, MANUAL_DURATION_MAX, 1),
+            SigenPriceSpikeNumber(coordinator, entry, "price_spike_min_soc", "Price Spike Minimum SOC",
+                                  "mdi:battery-low", "min_soc", PERCENTAGE, 0, 100, 1),
         ]
     async_add_entities(entities)
 
@@ -163,3 +186,48 @@ class SigenManualControlPowerLimitNumber(SigenManualControlSettingEntity, Number
             _LOGGER.info("Sigenergy Cloud Control: manual control power limit set to %.1f kW (used on next start)", value)
         else:
             _LOGGER.info("Sigenergy Cloud Control: manual control power limit set to no limit (used on next start)")
+
+
+class SigenPriceSpikeNumber(SigenPriceSpikeEntity, NumberEntity):
+    """One Price Spike Export setting. Saved to disk and used from the next
+    decision on."""
+
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str, name: str, icon: str,
+                 setting: str, unit, low, high, step, device_class=None):
+        super().__init__(coordinator, entry, unique_suffix)
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        self._attr_native_min_value = low
+        self._attr_native_max_value = high
+        self._attr_native_step = step
+        self._attr_device_class = device_class
+        self._setting = setting
+
+    @property
+    def native_value(self):
+        return self._controller.settings[self._setting]
+
+    async def async_set_native_value(self, value: float) -> None:
+        if isinstance(self._controller.settings[self._setting], int):
+            value = int(value)
+        else:
+            value = round(float(value), 3)
+        await self._controller.async_set(**{self._setting: value})
+
+
+class SigenPriceSpikeThresholdNumber(SigenPriceSpikeNumber):
+    """Price at or above which a spike starts, in the price entity's own
+    unit (e.g. $/kWh or EUR/MWh)."""
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator, entry, "price_spike_threshold", "Price Spike Threshold",
+                         "mdi:cash-alert", "threshold", None,
+                         SPIKE_THRESHOLD_MIN, SPIKE_THRESHOLD_MAX, 0.001)
+
+    @property
+    def native_unit_of_measurement(self):
+        # The price entity may load after this one, so follow it.
+        return self._controller.price_unit

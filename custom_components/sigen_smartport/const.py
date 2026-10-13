@@ -12,8 +12,12 @@ CONF_DEVICE_KIND = "device_kind"
 DEVICE_KIND_SMART_PORT = "smart_port"
 DEVICE_KIND_AC_CHARGER = "ac_charger"
 
-PLATFORMS_SMART_PORT = [Platform.SWITCH, Platform.SELECT, Platform.BUTTON, Platform.SENSOR, Platform.NUMBER]
-PLATFORMS_AC_CHARGER = [Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER, Platform.BUTTON]
+PLATFORMS_SMART_PORT = [
+    Platform.SWITCH, Platform.SELECT, Platform.BUTTON, Platform.SENSOR, Platform.NUMBER, Platform.BINARY_SENSOR,
+]
+PLATFORMS_AC_CHARGER = [
+    Platform.SENSOR, Platform.SELECT, Platform.SWITCH, Platform.NUMBER, Platform.BUTTON, Platform.BINARY_SENSOR,
+]
 
 CONF_STATION_ID = "station_id"
 CONF_LOAD_PATH = "load_path"
@@ -131,3 +135,44 @@ MANUAL_POWER_LIMIT_NONE = "4294967.295"
 
 SERVICE_START_MANUAL_CONTROL = "start_manual_control"
 SERVICE_STOP_MANUAL_CONTROL = "stop_manual_control"
+
+# Price Spike Export - force-discharge through Instant Manual Control while a
+# price entity (from any other integration) is at or above a threshold.
+# Options-flow keys, set on the entry that owns the station.
+CONF_SPIKE_ENABLED = "price_spike_enabled"
+CONF_SPIKE_PRICE_ENTITY = "price_spike_price_entity"
+CONF_SPIKE_SOC_ENTITY = "price_spike_soc_entity"
+CONF_SPIKE_NOTIFY_ACTION = "price_spike_notify_action"
+SPIKE_OPTION_KEYS = (CONF_SPIKE_ENABLED, CONF_SPIKE_PRICE_ENTITY, CONF_SPIKE_SOC_ENTITY, CONF_SPIKE_NOTIFY_ACTION)
+
+# Dashboard-tunable settings: defaults and ranges.
+SPIKE_THRESHOLD_DEFAULT = 1.0
+SPIKE_THRESHOLD_MIN = -100000.0
+SPIKE_THRESHOLD_MAX = 100000.0
+SPIKE_START_DELAY_DEFAULT = 0     # minutes
+SPIKE_START_DELAY_MAX = 60
+SPIKE_HOLD_TIME_DEFAULT = 10      # minutes
+SPIKE_HOLD_TIME_MAX = 120
+SPIKE_POWER_DEFAULT = 10.0        # kW, 0 = no limit (as for manual control)
+SPIKE_DURATION_DEFAULT = 30       # minutes per manual control session
+SPIKE_MIN_SOC_DEFAULT = 20        # %
+
+EVENT_SPIKE_STARTED = f"{DOMAIN}_price_spike_export_started"
+EVENT_SPIKE_STOPPED = f"{DOMAIN}_price_spike_export_stopped"
+
+# Reasons the feature stops discharging (event data and attributes).
+SPIKE_STOP_PRICE = "price_below_threshold"
+SPIKE_STOP_SOC = "soc_at_minimum"
+SPIKE_STOP_SWITCHED_OFF = "switched_off"
+SPIKE_STOP_FEATURE_DISABLED = "feature_disabled"
+
+# Unique ID suffixes of every Price Spike Export entity (after "{station_id}_"),
+# so they can be removed again when the feature is turned off in Configure.
+SPIKE_ENTITY_SUFFIXES = {
+    "switch": ("price_spike_export", "price_spike_take_over"),
+    "number": (
+        "price_spike_threshold", "price_spike_start_delay", "price_spike_hold_time",
+        "price_spike_discharge_power", "price_spike_session_duration", "price_spike_min_soc",
+    ),
+    "binary_sensor": ("price_spike_active", "price_spike_discharging"),
+}

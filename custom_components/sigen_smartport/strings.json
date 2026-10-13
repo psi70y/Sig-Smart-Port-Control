@@ -67,6 +67,13 @@
     "step": {
       "init": {
         "title": "Sigenergy Cloud Control options",
+        "menu_options": {
+          "settings": "Connection settings",
+          "price_spike": "Price Spike Export"
+        }
+      },
+      "settings": {
+        "title": "Sigenergy Cloud Control options",
         "description": "How often Home Assistant polls the Sigen cloud for this device's real state. Lower values catch changes faster but log in more often - the default of 300s (5 minutes) is a sensible balance.",
         "data": {
           "region": "Region",
@@ -74,7 +81,27 @@
           "scan_interval": "Poll interval (seconds)",
           "profile_refresh_days": "Refresh full Energy Profile list every (days)"
         }
+      },
+      "price_spike": {
+        "title": "Price Spike Export",
+        "description": "Discharge the battery while a price entity from another integration (for example AEMO NEM, Amber, Nord Pool, ENTSO-E, EPEX Spot, Tibber or Octopus) is at or above a threshold. Off by default. When it's turned on, its switches and settings appear on the Sigen Station device, where the threshold, timings, power and minimum SOC can be changed at any time. The threshold uses the price entity's own unit and currency.",
+        "data": {
+          "price_spike_enabled": "Turn on Price Spike Export",
+          "price_spike_price_entity": "Price entity",
+          "price_spike_soc_entity": "Battery SOC entity (%)",
+          "price_spike_notify_action": "Notify action (optional)"
+        },
+        "data_description": {
+          "price_spike_price_entity": "A numeric price sensor, such as a wholesale or spot price. An input_number helper also works, for testing.",
+          "price_spike_soc_entity": "Your battery's state of charge in %, for example from a local Modbus integration. The Sigenergy cloud API used here doesn't provide it.",
+          "price_spike_notify_action": "For example notify.mobile_app_your_phone. Called when discharging starts and stops. Leave blank to only fire the events sigen_smartport_price_spike_export_started and sigen_smartport_price_spike_export_stopped."
+        }
       }
+    },
+    "error": {
+      "price_entity_required": "Choose a price entity to turn Price Spike Export on.",
+      "soc_entity_required": "Choose a battery SOC entity to turn Price Spike Export on.",
+      "invalid_notify_action": "No such action. Use the form notify.your_notifier, as listed in Developer Tools > Actions."
     }
   },
   "selector": {

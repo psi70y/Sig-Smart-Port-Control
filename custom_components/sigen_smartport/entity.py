@@ -70,3 +70,23 @@ class SigenManualControlSettingEntity:
     @property
     def _settings(self):
         return self.coordinator.manual_settings
+
+
+class SigenPriceSpikeEntity:
+    """Base for the Price Spike Export entities on the station device. They
+    show the PriceSpikeController's settings and state, and update when it
+    tells them to."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str):
+        self.coordinator = coordinator
+        self._controller = coordinator.price_spike
+        station_id = entry.data[CONF_STATION_ID]
+        self._attr_unique_id = f"{station_id}_{unique_suffix}"
+        self._attr_device_info = station_device_info(station_id)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._controller.async_add_listener(self.async_write_ha_state))

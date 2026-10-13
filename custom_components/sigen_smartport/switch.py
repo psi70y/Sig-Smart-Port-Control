@@ -18,7 +18,7 @@ from .const import (
     AC_FIELD_MAX_GRID_POWER,
     AC_FALLBACK_GRID_POWER_KW,
 )
-from .entity import SigenAcChargerEntity, SigenManualControlSettingEntity
+from .entity import SigenAcChargerEntity, SigenManualControlSettingEntity, SigenPriceSpikeEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +38,14 @@ async def async_setup_entry(
     # Profile creates it (see _claim_station_profile in __init__.py).
     if coordinator.owns_station_profile:
         entities.append(SigenManualControlReplaceRunningSwitch(coordinator, entry))
+    # Only when Price Spike Export is turned on in Configure.
+    if coordinator.price_spike:
+        entities += [
+            SigenPriceSpikeSwitch(coordinator, entry, "price_spike_export", "Price Spike Export",
+                                  "mdi:transmission-tower-export", "enabled"),
+            SigenPriceSpikeSwitch(coordinator, entry, "price_spike_take_over",
+                                  "Price Spike Take Over Manual Control", "mdi:swap-horizontal", "take_over"),
+        ]
     async_add_entities(entities)
 
 
@@ -156,3 +164,24 @@ class SigenManualControlReplaceRunningSwitch(SigenManualControlSettingEntity, Sw
             "Sigenergy Cloud Control: Start Manual Control will now %s a running manual control",
             "replace" if on else "refuse to replace",
         )
+
+
+class SigenPriceSpikeSwitch(SigenPriceSpikeEntity, SwitchEntity):
+    """Price Spike Export on/off, and whether it may take over a manual
+    control the user started (off: it waits for that to end)."""
+
+    def __init__(self, coordinator, entry: ConfigEntry, unique_suffix: str, name: str, icon: str, setting: str):
+        super().__init__(coordinator, entry, unique_suffix)
+        self._attr_name = name
+        self._attr_icon = icon
+        self._setting = setting
+
+    @property
+    def is_on(self) -> bool:
+        return self._controller.settings[self._setting]
+
+    async def async_turn_on(self, **kwargs):
+        await self._controller.async_set(**{self._setting: True})
+
+    async def async_turn_off(self, **kwargs):
+        await self._controller.async_set(**{self._setting: False})
