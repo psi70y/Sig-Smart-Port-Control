@@ -342,12 +342,17 @@ class PriceSpikeController:
 
     def _read_number(self, entity_id: str) -> tuple[float | None, str | None]:
         state = self.hass.states.get(entity_id)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if state is None:
             return None, None
+        # The unit is kept even without a usable value - right after a
+        # restart the price entity is often still unknown.
+        unit = state.attributes.get("unit_of_measurement")
+        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None, unit
         try:
-            return float(state.state), state.attributes.get("unit_of_measurement")
+            return float(state.state), unit
         except ValueError:
-            return None, None
+            return None, unit
 
     @callback
     def _read_price(self) -> None:
