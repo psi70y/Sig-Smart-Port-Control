@@ -5,6 +5,7 @@ A custom Home Assistant integration that controls your Sigenergy system through 
 - **Smart Port loads**: switch them on and off, and between Manual and Auto (Sig Schedule)
 - **Energy Profile**: read and switch your system's overall profile (built-in modes and your own saved custom profiles)
 - **Instant Manual Control**: charge, discharge, hold or self-consume for a set time (see [Instant Manual Control](#instant-manual-control))
+- **Off-grid control**: disconnect your home from the grid and reconnect it, like the mySigen app's off-grid switch (see [Off-Grid Control](#off-grid-control))
 - **Sigenergy AC EV Charger**: monitor it and change its charging settings (see [AC EV Charger](#ac-ev-charger))
 
 > **Formerly "Sigenergy Smart Port".** It was renamed in version 2.9.0 because it now does much more than control Smart Ports. Nothing changes for existing installs: it's the same HACS repository, and your devices, entity IDs and automations stay as they are.
@@ -41,6 +42,7 @@ The official Sigenergy OpenAPI restricts or completely locks out remote control 
 - **Energy Profile selector**: switch between built-in system modes and your own saved custom profiles, synced with the cloud.
 - **Instant Manual Control**: start or stop the mySigen app's Instant Manual Control, with a status sensor that also shows manual control started from the app, plus actions for automations — see [Instant Manual Control](#instant-manual-control).
 - **Price Spike Export** (optional): force-discharge during price spikes, using any price entity — see [Price Spike Export](#price-spike-export).
+- **Off-Grid Control** (optional): take the home off the grid and back on, plus a sensor showing whether it's on-grid, off-grid or reconnecting — see [Off-Grid Control](#off-grid-control). Local Modbus integrations don't offer this.
 - **Refresh Energy Profiles button**: manually re-fetch the profile/mode option list on demand — useful right after creating a new custom profile in the mySigen app.
 - **Configurable poll interval**: how often HA checks the cloud for real state, adjustable per device.
 - **Configurable Energy Profile list refresh**: how often the full list of selectable profiles/modes is automatically re-checked in the background (default 30 days) — a safety net alongside the manual button.
@@ -377,6 +379,48 @@ If you'd rather not touch real sensors, two **Number** helpers (**Settings → D
 
 ---
 
+## Off-Grid Control
+
+Disconnects your home from the grid and reconnects it, the same as the off-grid switch in the mySigen app. While off-grid, your home runs only on solar and battery. Handy for testing your backup setup, or riding out an expected grid problem on your own terms. Local Modbus integrations don't offer this.
+
+**It needs a Sigen Gateway**, and the control is **off by default**: nothing changes for existing users until it's turned on in **Configure**.
+
+> ⚠️ **This physically disconnects your home from the grid.** While off-grid you can't import power, so if the battery runs low your home can lose power until it is reconnected. Exports and anything that relies on the grid (including [Price Spike Export](#price-spike-export)) stop too. Only automate it if you're sure the automation can't trigger at the wrong time, and keep an eye on your battery while off-grid.
+
+### Turning it on
+
+1. Go to **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Off-Grid Control**. On a station with several entries, it's on the entry that owns the station's Energy Profile.
+2. Tick **Turn on Off-Grid Control** and submit. A **Grid Mode** select appears on the **Sigen Station** device.
+
+If your system doesn't report support for switching off-grid (for example, it has no Sigen Gateway), Grid Mode isn't created and a warning is logged. Turning the option off again removes Grid Mode.
+
+### Entities
+
+| Entity | Type | What it does |
+|---|---|---|
+| Grid Mode | Select | **Off-Grid** disconnects from the grid, **On-Grid** reconnects. Only with Off-Grid Control turned on. Shows the mode last commanded: while the system is still reconnecting, it already shows On-Grid |
+| Grid Connection | Sensor | What the system actually reports: **On-Grid**, **Off-Grid** or **Reconnecting**. Created whenever your system reports a grid status, whether Off-Grid Control is on or not. The raw code is the `status_code` attribute |
+
+An automation example:
+
+```yaml
+action: select.select_option
+target:
+  entity_id: select.sigen_station_your_station_id_grid_mode
+data:
+  option: "Off-Grid"
+```
+
+### Good to know
+
+- **Going off-grid takes a few seconds; reconnecting takes longer.** In testing, going off-grid took about 3 seconds. Reconnecting took about 15 seconds, while the gateway synchronises with the grid. During that time Grid Connection shows **Reconnecting**.
+- **HA re-checks 30 seconds after a switch**, so Grid Connection shows the result without waiting for the next poll.
+- **A switch made in the mySigen app shows up at the next poll.** So does a real grid outage, which also shows as Off-Grid.
+- **Choosing the mode it's already in sends nothing.** Choosing Off-Grid while it's still reconnecting is refused with an error. Wait until Grid Connection shows On-Grid.
+- **There's no extra confirmation.** The mySigen app asks "are you sure?", but that's only in the app. Home Assistant sends the command as soon as you choose the option.
+
+---
+
 ## AC EV Charger
 
 If you have a Sigenergy AC EV Charger on the same station, it can be added as its own device. Tested so far with an EVAC 22 on the EU region.
@@ -428,6 +472,7 @@ Many Sigenergy owners also run a local Modbus integration, such as [Sigenergy ES
 | Smart Port loads (on/off, Manual/Auto) | ✅ Yes. Modbus only reads smart load consumption |
 | AC EV Charger settings (Charging Mode, Battery Boost, Grid Charging) | ✅ Yes. Modbus covers different charger controls (start/stop, output current) |
 | Energy Profile, Instant Manual Control and Price Spike Export | ⚠️ Not together with Remote EMS (see below) |
+| Off-Grid Control | ✅ Yes. Modbus doesn't offer it |
 
 **Recommendation: use only one thing to control what the plant does.** Don't use this integration's **Energy Profile** or **Instant Manual Control** while **Remote EMS** is enabled through a Modbus integration. Both tell the battery and inverter what to do, so they would override each other. Remote EMS takes the plant off its Energy Profile until Remote EMS is switched off again. Instant Manual Control expects the Energy Profile to take over again when it ends.
 
