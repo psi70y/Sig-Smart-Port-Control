@@ -10,6 +10,8 @@ authenticated request helper. Two concrete clients build on it:
     PATCH .../control-mode                 -> set Auto/Manual mode
     GET/PUT .../energy-profile/mode/...    -> station-wide operation mode
     GET/PUT .../energy-profile/instant/manunal -> Instant Manual Control
+    GET  .../gateway/gateway-status        -> on-grid / off-grid status
+    POST .../gateway/ongrid-state/update   -> go off-grid / reconnect
 
   - SigenAcChargerClient: AC EV charger status + charging mode
     GET  .../acevse/charge/status          -> plug/charge status code
@@ -96,6 +98,10 @@ class _SigenBaseClient:
         self.manual_enabled = None    # None until first read
         self.manual_mode = None       # cloud mode string, e.g. "0" = Charging
         self.manual_end_time = None   # wall-clock epoch seconds
+
+        # Station-wide grid connection (needs a Sigen Gateway).
+        self.grid_status = None            # onOffGridStatus: 0 on-grid, 1 reconnecting, 2 off-grid
+        self.grid_control_supported = None  # showButton - the app offers the off-grid switch
 
     @property
     def station_id(self) -> str:
@@ -452,6 +458,59 @@ class _SigenBaseClient:
         self.manual_mode = None
         self.manual_end_time = None
         return True
+
+    # ---------------------------------------------------- off-grid control
+
+    def fetch_grid_status(self):
+        """Read whether the station is on-grid, off-grid or reconnecting,
+        and whether it supports switching off-grid at all. Also picks up a
+        switch made from the mySigen app, or a real grid outage."""
+        url = f"{self._base_url}/device/gateway/gateway-status"
+        res = self._request("GET", url, {"stationId": self._station_id})
+        if res is None or res.status_code != 200:
+            _LOGGER.debug("Sigen grid status read failed: %s", res.text if res else "no response")
+            return False
+        try:
+            body = res.json()
+        except ValueError:
+            return False
+        if body.get("code") != 0 or not isinstance(body.get("data"), dict):
+            _LOGGER.debug("Sigen grid status read rejected: %s", body)
+            return False
+
+        data = body["data"]
+        status = data.get("onOffGridStatus")
+        if status != self.grid_status:
+            _LOGGER.info(
+                "Sigenergy Cloud Control: station grid status is %s (onOffGridStatus %s)",
+                {0: "on-grid", 1: "reconnecting to the grid", 2: "off-grid"}.get(status, "unknown"),
+                status,
+            )
+        self.grid_status = status
+        self.grid_control_supported = bool(data.get("showButton"))
+        return True
+
+    def set_off_grid(self, off_grid: bool):
+        """Disconnect the station from the grid (True) or reconnect it
+        (False). The app sends onGridState 1 to go off-grid and 0 to go back
+        on-grid - the opposite of what the field name suggests. The cloud
+        answers {"code": 0, "data": 0} on success."""
+        url = f"{self._base_url}/device/gateway/ongrid-state/update"
+        body = {"onGridState": 1 if off_grid else 0, "stationId": int(self._station_id)}
+        res = self._request("POST", url, json_body=body)
+        if res is not None and res.status_code == 200:
+            try:
+                ok = res.json().get("code") == 0
+            except ValueError:
+                ok = False
+            if ok:
+                _LOGGER.info(
+                    "Sigenergy Cloud Control: sent %s command to the station",
+                    "go off-grid" if off_grid else "reconnect to grid",
+                )
+                return True
+        _LOGGER.error("Error sending Sigen off-grid command %s: %s", body, res.text if res else "no response")
+        return False
 
 
 class SigenSmartLoadClient(_SigenBaseClient):

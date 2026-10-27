@@ -16,11 +16,11 @@ except ImportError:  # HA < 2026.9
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.const import ATTR_DEVICE_ID, ATTR_ENTITY_ID, CONF_USERNAME, CONF_PASSWORD
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.event import async_call_later, async_track_point_in_utc_time
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -46,9 +46,14 @@ from .const import (
     CONF_SPIKE_PRICE_ENTITY,
     CONF_SPIKE_PRICE_UNIT,
     CONF_SPIKE_SOC_ENTITY,
+    CONF_OFF_GRID_CONTROL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
     DEFAULT_BASE_URL,
+    GRID_MODE_SUFFIX,
+    GRID_STATUS_OFF_GRID,
+    GRID_STATUS_ON_GRID,
+    GRID_STATUS_RECONNECTING,
     MANUAL_ACTION_KEYS,
     MANUAL_DURATION_DEFAULT,
     MANUAL_DURATION_MAX,
@@ -89,6 +94,11 @@ STATION_PROFILE_OWNERS = f"{DOMAIN}_station_profile_owners"
 # show it ended without waiting for the next regular poll. The small delay
 # gives the cloud time to report it as finished.
 MANUAL_END_REFRESH_DELAY_SECONDS = 20
+
+# Refresh this long after an off-grid / reconnect command, so the Grid
+# Connection sensor shows the result without waiting for the next poll.
+# In the capture, going off-grid took ~3s and reconnecting ~14s.
+GRID_SWITCH_REFRESH_DELAY_SECONDS = 30
 
 # Setup is UI-only (config entries); async_setup exists just to register
 # the integration's actions.
@@ -146,6 +156,7 @@ async def _async_update_station_profile(hass: HomeAssistant, client, profile_ref
     """
     await hass.async_add_executor_job(client.fetch_current_profile)
     await hass.async_add_executor_job(client.fetch_manual_control)
+    await hass.async_add_executor_job(client.fetch_grid_status)
 
     fetched_at = client.profile_options_fetched_at
     if fetched_at is None or (time.time() - fetched_at) >= profile_refresh_seconds:
@@ -195,16 +206,21 @@ def _release_station_profile(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 class _StationCoordinatorMixin:
-    """Instant Manual Control handling shared by both coordinator types.
-    Only used by the entry that owns the station's Energy Profile."""
+    """Instant Manual Control and off-grid handling shared by both
+    coordinator types. Only used by the entry that owns the station's
+    Energy Profile."""
 
     # ManualControlSettings for the owning entry, None otherwise.
     manual_settings = None
     # PriceSpikeController when this entry owns the station and Price Spike
     # Export is turned on in Configure, None otherwise.
     price_spike = None
+    # True when this entry owns the station and Off-Grid Control is turned
+    # on in Configure, so the Grid Mode select is created.
+    off_grid_control = False
     _manual_end_unsub = None
     _manual_lock = None
+    _grid_refresh_unsub = None
 
     @property
     def manual_lock(self) -> asyncio.Lock:
@@ -267,6 +283,47 @@ class _StationCoordinatorMixin:
             self._manual_end_unsub()
             self._manual_end_unsub = None
 
+    def _grid_data(self) -> dict:
+        return {
+            "grid_status": self.client.grid_status,
+            "grid_control_supported": self.client.grid_control_supported,
+        }
+
+    async def async_set_off_grid(self, off_grid: bool) -> None:
+        """Send the off-grid / reconnect command, show the expected state
+        straight away, and re-check it once the switch should be done."""
+        status = self.client.grid_status
+        if status == GRID_STATUS_RECONNECTING:
+            raise HomeAssistantError(
+                "The station is still reconnecting to the grid. Try again once it's back on-grid."
+            )
+        if status == (GRID_STATUS_OFF_GRID if off_grid else GRID_STATUS_ON_GRID):
+            _LOGGER.info(
+                "Sigenergy Cloud Control: station is already %s - nothing sent",
+                "off-grid" if off_grid else "on-grid",
+            )
+            return
+        ok = await self.hass.async_add_executor_job(self.client.set_off_grid, off_grid)
+        if not ok:
+            raise HomeAssistantError("Sigenergy rejected the off-grid command. See the log for details.")
+        # Best guess until the delayed refresh reads the real state back.
+        self.client.grid_status = GRID_STATUS_OFF_GRID if off_grid else GRID_STATUS_RECONNECTING
+        self.async_set_updated_data({**self.data, **self._grid_data()})
+        self.cancel_grid_refresh()
+        self._grid_refresh_unsub = async_call_later(
+            self.hass, GRID_SWITCH_REFRESH_DELAY_SECONDS, self._async_grid_refresh_due
+        )
+
+    async def _async_grid_refresh_due(self, _now) -> None:
+        self._grid_refresh_unsub = None
+        await self.async_request_refresh()
+
+    @callback
+    def cancel_grid_refresh(self) -> None:
+        if self._grid_refresh_unsub:
+            self._grid_refresh_unsub()
+            self._grid_refresh_unsub = None
+
 
 class SigenCoordinator(_StationCoordinatorMixin, DataUpdateCoordinator):
     """Polls one Smart Port load (plus its station's energy profile) and
@@ -297,6 +354,7 @@ class SigenCoordinator(_StationCoordinatorMixin, DataUpdateCoordinator):
             "energy_mode": self.client.current_energy_mode,
             "energy_profile_id": self.client.current_profile_id,
             **self._manual_control_data(),
+            **self._grid_data(),
         }
 
 
@@ -347,6 +405,7 @@ class SigenAcChargerCoordinator(_StationCoordinatorMixin, DataUpdateCoordinator)
             "energy_mode": self.client.current_energy_mode,
             "energy_profile_id": self.client.current_profile_id,
             **self._manual_control_data(),
+            **self._grid_data(),
         }
 
 
@@ -462,6 +521,24 @@ async def _async_setup_price_spike(hass: HomeAssistant, entry: ConfigEntry, coor
 
 
 @callback
+def _setup_off_grid_control(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
+    """Decide whether the station owner gets the Grid Mode select. With
+    Off-Grid Control turned off in Configure, remove the select so it isn't
+    left behind as unavailable."""
+    entry.async_on_unload(coordinator.cancel_grid_refresh)
+    if not coordinator.owns_station_profile:
+        return
+    coordinator.off_grid_control = bool(entry.options.get(CONF_OFF_GRID_CONTROL))
+    if not coordinator.off_grid_control:
+        ent_reg = er.async_get(hass)
+        entity_id = ent_reg.async_get_entity_id(
+            "select", DOMAIN, f"{entry.data[CONF_STATION_ID]}_{GRID_MODE_SUFFIX}"
+        )
+        if entity_id:
+            ent_reg.async_remove(entity_id)
+
+
+@callback
 def _has_spike_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return async_find_device(hass, entry.entry_id, f"price_spike_{entry.data[CONF_STATION_ID]}") is not None
 
@@ -566,6 +643,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = ac_coordinator
         await _async_setup_manual_control(hass, entry, ac_coordinator)
         await _async_setup_price_spike(hass, entry, ac_coordinator)
+        _setup_off_grid_control(hass, entry, ac_coordinator)
         had_spike_device = _has_spike_device(hass, entry)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_AC_CHARGER)
         if ac_coordinator.price_spike:
@@ -596,6 +674,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_setup_manual_control(hass, entry, coordinator)
     await _async_setup_price_spike(hass, entry, coordinator)
+    _setup_off_grid_control(hass, entry, coordinator)
     had_spike_device = _has_spike_device(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_SMART_PORT)

@@ -44,6 +44,7 @@ from .const import (
     CONF_SPIKE_PRICE_ENTITY,
     CONF_SPIKE_PRICE_UNIT,
     CONF_SPIKE_SOC_ENTITY,
+    CONF_OFF_GRID_CONTROL,
     SPIKE_OPTION_KEYS,
     DEFAULT_BASE_URL,
     DEFAULT_AUTH_HEADER,
@@ -283,7 +284,7 @@ _NUMERIC_ENTITY_SELECTOR = EntitySelector(EntitySelectorConfig(domain=["sensor",
 class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
     """Lets region/poll interval/etc be changed later via 'Configure'
     without deleting and re-adding the device, and sets up Price Spike
-    Export on the entry that owns the station."""
+    Export and Off-Grid Control on the entry that owns the station."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
@@ -293,11 +294,12 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
         return bool(coordinator and coordinator.owns_station_profile)
 
     async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
-        # Price Spike Export is station-wide, so only the entry that owns the
-        # station's entities offers it. The others go straight to settings.
+        # Price Spike Export and Off-Grid Control are station-wide, so only
+        # the entry that owns the station's entities offers them. The others
+        # go straight to settings.
         if not self._owns_station():
             return await self.async_step_settings()
-        return self.async_show_menu(step_id="init", menu_options=["settings", "price_spike"])
+        return self.async_show_menu(step_id="init", menu_options=["settings", "price_spike", "off_grid"])
 
     async def async_step_settings(self, user_input: dict | None = None) -> ConfigFlowResult:
         entry = self._config_entry
@@ -378,3 +380,18 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
             data_schema=self.add_suggested_values_to_schema(schema, suggested),
             errors=errors,
         )
+
+    async def async_step_off_grid(self, user_input: dict | None = None) -> ConfigFlowResult:
+        entry = self._config_entry
+        if user_input is not None:
+            # Keep the other pages' options.
+            return self.async_create_entry(
+                title="",
+                data={**entry.options, CONF_OFF_GRID_CONTROL: bool(user_input.get(CONF_OFF_GRID_CONTROL))},
+            )
+        schema = vol.Schema({
+            vol.Optional(
+                CONF_OFF_GRID_CONTROL, default=bool(entry.options.get(CONF_OFF_GRID_CONTROL))
+            ): bool,
+        })
+        return self.async_show_form(step_id="off_grid", data_schema=schema)

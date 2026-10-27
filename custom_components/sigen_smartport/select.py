@@ -20,8 +20,14 @@ from .const import (
     AC_CHARGE_MODE_VALUES,
     AC_CHARGE_MODE_LABELS,
     MANUAL_ACTION_MODES,
+    GRID_MODE_SUFFIX,
+    GRID_STATE_OFF_GRID,
+    GRID_STATE_ON_GRID,
+    GRID_STATUS_OFF_GRID,
+    GRID_STATUS_ON_GRID,
+    GRID_STATUS_RECONNECTING,
 )
-from .entity import SigenManualControlSettingEntity
+from .entity import SigenManualControlSettingEntity, station_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +45,15 @@ async def async_setup_entry(
     if coordinator.owns_station_profile:
         entities.append(SigenEnergyProfileSelector(coordinator, entry))
         entities.append(SigenManualControlActionSelector(coordinator, entry))
+    if coordinator.off_grid_control:
+        if coordinator.data.get("grid_control_supported"):
+            entities.append(SigenGridModeSelector(coordinator, entry))
+        else:
+            _LOGGER.warning(
+                "Sigenergy Cloud Control: Off-Grid Control is turned on, but station %s doesn't "
+                "report support for switching off-grid (it needs a Sigen Gateway) - Grid Mode not created",
+                entry.data[CONF_STATION_ID],
+            )
     async_add_entities(entities)
 
 
@@ -212,3 +227,44 @@ class SigenManualControlActionSelector(SigenManualControlSettingEntity, SelectEn
         await self._settings.async_set(action=option)
         self.async_write_ha_state()
         _LOGGER.info("Sigenergy Cloud Control: manual control action set to %s (used on next start)", option)
+
+
+class SigenGridModeSelector(CoordinatorEntity, SelectEntity):
+    """Disconnect the station from the grid (Off-Grid) or reconnect it
+    (On-Grid), like the off-grid switch in the mySigen app. Only created
+    after opting in under Configure, since it cuts the home off the grid.
+
+    Shows the commanded mode: while the gateway is still reconnecting it
+    already shows On-Grid. The Grid Connection sensor shows the real state."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Grid Mode"
+    _attr_options = [GRID_STATE_ON_GRID, GRID_STATE_OFF_GRID]
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator)
+        station_id = entry.data[CONF_STATION_ID]
+        self._attr_unique_id = f"{station_id}_{GRID_MODE_SUFFIX}"
+        self._attr_device_info = station_device_info(station_id)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.data.get("grid_status") is not None
+
+    @property
+    def icon(self) -> str:
+        if self.current_option == GRID_STATE_OFF_GRID:
+            return "mdi:transmission-tower-off"
+        return "mdi:transmission-tower"
+
+    @property
+    def current_option(self) -> str | None:
+        status = self.coordinator.data.get("grid_status")
+        if status == GRID_STATUS_OFF_GRID:
+            return GRID_STATE_OFF_GRID
+        if status in (GRID_STATUS_ON_GRID, GRID_STATUS_RECONNECTING):
+            return GRID_STATE_ON_GRID
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_off_grid(option == GRID_STATE_OFF_GRID)

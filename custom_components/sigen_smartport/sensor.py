@@ -1,5 +1,6 @@
 """Sensor platform - read-only AC EV Charger telemetry, and the station's
-Instant Manual Control status (for whichever entry owns the station).
+Instant Manual Control and grid connection status (for whichever entry
+owns the station).
 """
 
 import logging
@@ -23,6 +24,8 @@ from .const import (
     MANUAL_ACTION_LABELS,
     MANUAL_ACTION_MODES,
     MANUAL_STATE_OFF,
+    GRID_STATE_OFF_GRID,
+    GRID_STATUS_LABELS,
 )
 from .entity import station_device_info
 
@@ -50,6 +53,9 @@ async def async_setup_entry(
             SigenManualControlStatusSensor(coordinator, entry),
             SigenManualControlEndsSensor(coordinator, entry),
         ]
+        # Only for stations that report a grid status (needs a Sigen Gateway).
+        if coordinator.data.get("grid_status") is not None:
+            entities.append(SigenGridConnectionSensor(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -238,3 +244,35 @@ class SigenManualControlEndsSensor(_SigenManualControlSensorBase):
         if not self.coordinator.data.get("manual_enabled") or not end_time:
             return None
         return datetime.fromtimestamp(end_time, tz=timezone.utc)
+
+
+class SigenGridConnectionSensor(_SigenManualControlSensorBase):
+    """Whether the station is on-grid, off-grid or reconnecting, as read
+    from the cloud - also after a switch in the mySigen app."""
+
+    _attr_name = "Grid Connection"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(GRID_STATUS_LABELS.values())
+
+    def __init__(self, coordinator, entry: ConfigEntry):
+        super().__init__(coordinator, entry, "grid_connection")
+
+    @property
+    def icon(self) -> str:
+        if self.native_value == GRID_STATE_OFF_GRID:
+            return "mdi:transmission-tower-off"
+        return "mdi:transmission-tower"
+
+    @property
+    def native_value(self):
+        status = self.coordinator.data.get("grid_status")
+        label = GRID_STATUS_LABELS.get(status)
+        if label is None and status is not None:
+            # Not seen in captures yet - show unknown rather than guess;
+            # the raw code is an attribute.
+            _LOGGER.debug("Sigenergy Cloud Control: unrecognised grid status %r", status)
+        return label
+
+    @property
+    def extra_state_attributes(self):
+        return {"status_code": self.coordinator.data.get("grid_status")}

@@ -136,6 +136,28 @@ MANUAL_POWER_LIMIT_NONE = "4294967.295"
 SERVICE_START_MANUAL_CONTROL = "start_manual_control"
 SERVICE_STOP_MANUAL_CONTROL = "stop_manual_control"
 
+# Off-grid control - confirmed by network capture of the mySigen web app
+# (POST /device/gateway/ongrid-state/update, GET /device/gateway/gateway-status).
+# onOffGridStatus as read from gateway-status. 1 was seen for ~14s while
+# the gateway synchronised back onto the grid.
+GRID_STATUS_ON_GRID = 0
+GRID_STATUS_RECONNECTING = 1
+GRID_STATUS_OFF_GRID = 2
+GRID_STATE_ON_GRID = "On-Grid"
+GRID_STATE_RECONNECTING = "Reconnecting"
+GRID_STATE_OFF_GRID = "Off-Grid"
+GRID_STATUS_LABELS = {
+    GRID_STATUS_ON_GRID: GRID_STATE_ON_GRID,
+    GRID_STATUS_RECONNECTING: GRID_STATE_RECONNECTING,
+    GRID_STATUS_OFF_GRID: GRID_STATE_OFF_GRID,
+}
+# Options-flow key: the Grid Mode select is only created after opting in,
+# since it physically disconnects the home from the grid.
+CONF_OFF_GRID_CONTROL = "off_grid_control_enabled"
+# Unique ID suffix of the Grid Mode select (after "{station_id}_"), so it
+# can be removed again when the option is turned off.
+GRID_MODE_SUFFIX = "grid_mode"
+
 # Price Spike Export - force-discharge through Instant Manual Control while a
 # price entity (from any other integration) is at or above a threshold.
 # Options-flow keys, set on the entry that owns the station.

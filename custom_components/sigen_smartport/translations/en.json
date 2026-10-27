@@ -69,7 +69,8 @@
         "title": "Sigenergy Cloud Control options",
         "menu_options": {
           "settings": "Connection settings",
-          "price_spike": "Price Spike Export"
+          "price_spike": "Price Spike Export",
+          "off_grid": "Off-Grid Control"
         }
       },
       "settings": {
@@ -97,6 +98,13 @@
           "price_spike_price_unit": "Shown next to the threshold, for example $/kWh or EUR/MWh. Only used if the price entity doesn't report a unit itself. It's just a label: the threshold is always compared with the entity's value as it is.",
           "price_spike_soc_entity": "Your battery's state of charge in %, for example from a local Modbus integration. The Sigenergy cloud API used here doesn't provide it.",
           "price_spike_notify_action": "For example notify.mobile_app_your_phone. Called when discharging starts and stops. Leave blank to only fire the events sigen_smartport_price_spike_export_started and sigen_smartport_price_spike_export_stopped."
+        }
+      },
+      "off_grid": {
+        "title": "Off-Grid Control",
+        "description": "Adds a Grid Mode select to the Sigen Station device that disconnects your home from the grid (Off-Grid) and reconnects it (On-Grid), like the off-grid switch in the mySigen app. Needs a Sigen Gateway. Off by default. While off-grid, your home runs only on solar and battery: if the battery runs low, your home can lose power until it is reconnected. The Grid Connection sensor, which shows the actual state, is created either way.",
+        "data": {
+          "off_grid_control_enabled": "Turn on Off-Grid Control"
         }
       }
     },
