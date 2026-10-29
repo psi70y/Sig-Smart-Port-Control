@@ -10,7 +10,7 @@
       },
       "smart_port": {
         "title": "Connect to Sigen Cloud",
-        "description": "Enter the same username/password you use in the mySigen app, plus your station ID and region. Find your station ID in the mySigen app URL or by asking your installer.",
+        "description": "Enter your mySigen account email, the password string captured from the mySigen web app's login request (not your typed password), your station ID and region. See [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials) in the README for how to find these.",
         "data": {
           "username": "Username (email)",
           "password": "Password",
@@ -33,7 +33,7 @@
       },
       "ac_charger": {
         "title": "Connect your AC Charger to Sigen Cloud",
-        "description": "Enter the same username/password you use in the mySigen app, your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info). If this integration already has a Smart Port entry for the same station, you can leave username and password blank to reuse its credentials.",
+        "description": "Enter your mySigen account email, the password string captured from the mySigen web app's login request (not your typed password - see [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials)), your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info). If this integration already has a Smart Port entry for the same station, you can leave username and password blank to reuse its credentials.",
         "data": {
           "username": "Username (email)",
           "password": "Password",
