@@ -39,6 +39,7 @@ from .const import (
     CONF_BASE_URL,
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
+    CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_PROFILE_REFRESH_DAYS,
     CONF_SPIKE_ENABLED,
@@ -616,6 +617,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_token.get("expiry"),
             stored_token.get("refresh_token"),
         )
+    elif data.get(CONF_REFRESH_TOKEN):
+        # First start of a new entry: no token file yet, so begin from the
+        # refresh token the setup check ended with. From then on the token
+        # file holds the latest one.
+        client.restore_cached_token(None, None, data[CONF_REFRESH_TOKEN])
 
     if is_ac_charger:
         ac_store = _ac_charger_store(hass, entry)

@@ -107,6 +107,11 @@ class _SigenBaseClient:
     def station_id(self) -> str:
         return str(self._station_id)
 
+    @property
+    def refresh_token(self):
+        """Latest refresh token, so setup can hand it on to the new entry."""
+        return self._refresh_token
+
     def restore_cached_token(self, token, expiry_epoch, refresh_token=None):
         """Reload a previously-persisted token (e.g. after a restart) so we
         don't force a fresh login unless it's actually expired."""
@@ -199,6 +204,17 @@ class _SigenBaseClient:
 
     def _password_login(self):
         """Full password-grant login - fallback path only, see module docstring."""
+        if not self._password:
+            # Entry was set up with a refresh token only, so there's nothing
+            # to fall back to.
+            _LOGGER.error(
+                "Sigenergy Cloud Control: refresh token was rejected and no password is set - "
+                "set up the device again with a new refresh token"
+            )
+            self._token = None
+            self._token_expiry = 0.0
+            return None
+
         token_url = f"{self._base_url}/auth/oauth/token"
         payload = {
             "scope": "server",

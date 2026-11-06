@@ -26,6 +26,10 @@ CONF_BASE_URL = "base_url"
 CONF_REGION = "region"
 CONF_AUTH_HEADER = "auth_header"
 CONF_USER_DEVICE_ID = "user_device_id"
+# Refresh token copied from a mySigen web login. Since app 4.1 the password
+# login is device-signed and can't be sent by us, but the refresh grant
+# still works, so this lets new users set up without a password login.
+CONF_REFRESH_TOKEN = "refresh_token"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_PROFILE_REFRESH_DAYS = "profile_refresh_days"
 

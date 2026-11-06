@@ -10,15 +10,20 @@
       },
       "smart_port": {
         "title": "Connect to Sigen Cloud",
-        "description": "Enter your mySigen account email, the password string captured from the mySigen web app's login request (not your typed password), your station ID and region. See [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials) in the README for how to find these.",
+        "description": "Enter your mySigen account email, your station ID and region, and a refresh token copied from a mySigen web app login. Since mySigen 4.1, a new setup needs the refresh token: the password login no longer works for new setups. See [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials) in the README for how to find these.",
         "data": {
           "username": "Username (email)",
-          "password": "Password",
+          "password": "Password (captured login string, optional)",
+          "refresh_token": "Refresh token",
           "station_id": "Station ID",
           "region": "Region",
           "load_path": "Load Path (leave as 1 unless you have multiple Smart Port loads)",
           "name": "Name for this device",
           "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "password": "Only works for setups made before mySigen 4.1. Leave blank if you're using a refresh token.",
+          "refresh_token": "The refresh_token value from the response to the web app's login request. Copy it into HA, then close that browser window without logging out."
         }
       },
       "smart_port_advanced": {
@@ -33,15 +38,20 @@
       },
       "ac_charger": {
         "title": "Connect your AC Charger to Sigen Cloud",
-        "description": "Enter your mySigen account email, the password string captured from the mySigen web app's login request (not your typed password - see [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials)), your station ID, region, and the charger's serial number (shown on the charger screen in the app, e.g. under Device Info). If this integration already has a Smart Port entry for the same station, you can leave username and password blank to reuse its credentials.",
+        "description": "Enter your mySigen account email, your station ID and region, the charger's serial number (shown on the charger screen in the app, e.g. under Device Info), and a refresh token copied from a mySigen web app login (see [Capturing your credentials](https://github.com/psi70y/Sig-Smart-Port-Control#capturing-your-credentials)). Each device needs its own refresh token, from its own login. If this integration already has a Smart Port entry for the same station that was set up with a password, you can leave username, password and refresh token blank to reuse its credentials.",
         "data": {
           "username": "Username (email)",
-          "password": "Password",
+          "password": "Password (captured login string, optional)",
+          "refresh_token": "Refresh token",
           "station_id": "Station ID",
           "region": "Region",
           "charger_sn": "Charger Serial Number",
           "name": "Name for this device",
           "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "password": "Only works for setups made before mySigen 4.1. Leave blank if you're using a refresh token.",
+          "refresh_token": "The refresh_token value from the response to the web app's login request. Copy it into HA, then close that browser window without logging out."
         }
       },
       "ac_charger_advanced": {
@@ -56,8 +66,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Couldn't log in or read status. Double-check your username, password, station ID, region, and (for chargers) the serial number.",
-      "missing_credentials": "Username and password are required - no existing entry for this station ID was found to reuse them from."
+      "cannot_connect": "Couldn't log in or read status. Double-check your refresh token (or password), station ID, region, and (for chargers) the serial number. A refresh token can only be used while it's still valid, so copy a fresh one if in doubt.",
+      "missing_credentials": "Enter a refresh token (or username and password). No existing entry for this station ID set up with a password was found to reuse.",
+      "missing_password_or_token": "Enter a refresh token or a password."
     },
     "abort": {
       "already_configured": "This device is already set up."

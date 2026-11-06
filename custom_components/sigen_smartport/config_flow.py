@@ -37,6 +37,7 @@ from .const import (
     CONF_REGION,
     CONF_AUTH_HEADER,
     CONF_USER_DEVICE_ID,
+    CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_PROFILE_REFRESH_DAYS,
     CONF_SPIKE_ENABLED,
@@ -64,9 +65,13 @@ from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
 _LOGGER = logging.getLogger(__name__)
 
 # --------------------------------------------------------------- Smart Port
+# Password or refresh token: at least one is needed. Since mySigen 4.1 the
+# password login no longer works for new setups, so the refresh token is
+# the way in for most people now.
 STEP_SMART_PORT_SCHEMA = vol.Schema({
     vol.Required(CONF_USERNAME): str,
-    vol.Required(CONF_PASSWORD): str,
+    vol.Optional(CONF_PASSWORD): str,
+    vol.Optional(CONF_REFRESH_TOKEN): str,
     vol.Required(CONF_STATION_ID): str,
     vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(REGION_CHOICES),
     vol.Optional(CONF_LOAD_PATH, default=DEFAULT_LOAD_PATH): str,
@@ -92,9 +97,11 @@ STEP_SMART_PORT_ADVANCED_SCHEMA = vol.Schema({
 # Username/password may be left blank when a Smart Port entry for the same
 # station already exists - its stored credentials are reused (see
 # _credentials_from_existing_entry), so they don't have to be captured twice.
+# A refresh token can't be shared that way: each entry needs its own.
 STEP_AC_CHARGER_SCHEMA = vol.Schema({
     vol.Optional(CONF_USERNAME): str,
     vol.Optional(CONF_PASSWORD): str,
+    vol.Optional(CONF_REFRESH_TOKEN): str,
     vol.Required(CONF_STATION_ID): str,
     vol.Optional(CONF_REGION, default=DEFAULT_REGION): vol.In(REGION_CHOICES),
     vol.Required(CONF_CHARGER_SN): str,
@@ -124,12 +131,30 @@ def _resolve_base_url(data: dict) -> dict:
     return data
 
 
+def _clean_credentials(user_input: dict) -> None:
+    """Make sure every credential key exists (blank if not given), and strip
+    the stray spaces or line breaks that come with a pasted token."""
+    for key in (CONF_USERNAME, CONF_PASSWORD, CONF_REFRESH_TOKEN):
+        user_input[key] = (user_input.get(key) or "").strip()
+
+
 class CannotConnect(HomeAssistantError):
     """Raised when we can't reach or authenticate against the Sigen cloud."""
 
 
-async def _validate_smart_port_login(hass: HomeAssistant, data: dict) -> None:
-    """Attempt a real login + one status read to confirm the credentials work."""
+def _seed_refresh_token(client, data: dict) -> None:
+    """Hand a pasted refresh token to the client, so the login check renews
+    with it instead of trying a password login."""
+    if data.get(CONF_REFRESH_TOKEN):
+        client.restore_cached_token(None, None, data[CONF_REFRESH_TOKEN])
+
+
+async def _validate_smart_port_login(hass: HomeAssistant, data: dict) -> str | None:
+    """Attempt a real login + one status read to confirm the credentials work.
+
+    Returns the refresh token the check ended up with. Using a refresh token
+    can hand back a new one, so the entry must keep this one, not the pasted one.
+    """
     client = SigenSmartLoadClient(
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
@@ -139,13 +164,16 @@ async def _validate_smart_port_login(hass: HomeAssistant, data: dict) -> None:
         data[CONF_AUTH_HEADER],
         data[CONF_USER_DEVICE_ID],
     )
+    _seed_refresh_token(client, data)
     ok = await hass.async_add_executor_job(client.refresh)
     if not ok:
         raise CannotConnect
+    return client.refresh_token
 
 
-async def _validate_ac_charger_login(hass: HomeAssistant, data: dict) -> None:
-    """Attempt a real login + one status read to confirm the credentials work."""
+async def _validate_ac_charger_login(hass: HomeAssistant, data: dict) -> str | None:
+    """Attempt a real login + one status read to confirm the credentials work.
+    Returns the latest refresh token, as for _validate_smart_port_login."""
     client = SigenAcChargerClient(
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
@@ -155,9 +183,11 @@ async def _validate_ac_charger_login(hass: HomeAssistant, data: dict) -> None:
         data[CONF_AUTH_HEADER],
         data[CONF_USER_DEVICE_ID],
     )
+    _seed_refresh_token(client, data)
     ok = await hass.async_add_executor_job(client.refresh)
     if not ok:
         raise CannotConnect
+    return client.refresh_token
 
 
 class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -180,9 +210,14 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._user_input = dict(user_input)
-            self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_SMART_PORT
-            return await self.async_step_smart_port_advanced()
+            user_input = dict(user_input)
+            _clean_credentials(user_input)
+            if not user_input[CONF_PASSWORD] and not user_input[CONF_REFRESH_TOKEN]:
+                errors["base"] = "missing_password_or_token"
+            else:
+                self._user_input = user_input
+                self._user_input[CONF_DEVICE_KIND] = DEVICE_KIND_SMART_PORT
+                return await self.async_step_smart_port_advanced()
 
         return self.async_show_form(
             step_id="smart_port", data_schema=STEP_SMART_PORT_SCHEMA, errors=errors
@@ -204,7 +239,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
-                await _validate_smart_port_login(self.hass, data)
+                data[CONF_REFRESH_TOKEN] = await _validate_smart_port_login(self.hass, data)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
@@ -230,7 +265,9 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input = dict(user_input)
-            if not user_input.get(CONF_USERNAME) or not user_input.get(CONF_PASSWORD):
+            _clean_credentials(user_input)
+            if not user_input[CONF_REFRESH_TOKEN] and (
+                    not user_input[CONF_USERNAME] or not user_input[CONF_PASSWORD]):
                 existing = self._credentials_from_existing_entry(user_input[CONF_STATION_ID])
                 if existing:
                     user_input.update(existing)
@@ -261,7 +298,7 @@ class SigenSmartPortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
-                await _validate_ac_charger_login(self.hass, data)
+                data[CONF_REFRESH_TOKEN] = await _validate_ac_charger_login(self.hass, data)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
