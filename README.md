@@ -10,6 +10,8 @@ A custom Home Assistant integration that controls your Sigenergy system through 
 
 > **Formerly "Sigenergy Smart Port".** It was renamed in version 2.9.0 because it now does much more than control Smart Ports. Nothing changes for existing installs: it's the same HACS repository, and your devices, entity IDs and automations stay as they are.
 
+> **Sigenergy changed its login in mySigen 4.1 (from version 2.12.0).** The web app now signs each login inside your browser, which this integration can't do. New setups use a **refresh token** copied from a web app login instead of the password. Existing setups keep running, because they renew their session with a refresh token and never need the password login. See [The mySigen 4.1 login change](#the-mysigen-41-login-change).
+
 > **Credit where it's due:** this is a fork of [CDSSBR/Sig-Smart-Port-Control](https://github.com/CDSSBR/Sig-Smart-Port-Control), which did the hard work of reverse-engineering the Sigen cloud auth and write endpoints in the first place. This fork adds read/sync, safer session handling, energy profile control, and a proper HACS + UI setup flow on top of that foundation.
 
 ## Why This Integration Exists
@@ -75,29 +77,39 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
 1. Go to **Settings → Devices & Services → Add Integration**, search for **"Sigenergy Cloud Control"**, and pick the device type: **Smart Port Load** or **AC EV Charger** (the charger steps are described in [AC EV Charger](#ac-ev-charger))
 2. For a Smart Port Load you'll be asked for:
    - **Username** — your mySigen account email
-   - **Password** — see note below, this is *not* simply your plaintext account password
+   - **Refresh token** — copied from a mySigen web app login, see [Capturing your credentials](#capturing-your-credentials) below
+   - **Password** — leave blank. It only works for setups made before mySigen 4.1 (see [The mySigen 4.1 login change](#the-mysigen-41-login-change))
    - **Station ID** — your 15-digit inverter station ID
    - **Region** — the Sigen cloud region your account lives in (`aus`, `apac`, `eu`, `cn`, `us`, or `custom` to enter an API base URL yourself in the Advanced step)
    - **Load Path** — leave as `1` unless you have multiple Smart Port loads (see [Multiple Devices](#multiple-devices) below)
    - **Name** — a friendly name for this device
    - **Poll interval** — how often (in seconds) HA checks the cloud for real state; defaults to `300` (5 minutes)
 3. An **Advanced** step follows with pre-filled defaults (API base URL, auth header, device ID, and how often the full Energy Profile list is auto-refreshed — default `30` days) — only change these if you know you need to.
-4. The wizard performs a real login and status check before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
+4. The wizard renews the session with your refresh token and checks the device status before finishing, so bad credentials are caught immediately with a clear error instead of a silently broken entity.
 
 The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Connection settings**, without needing to remove and re-add the device. On the entry that owns the station's Energy Profile, Configure also has a **Price Spike Export** page.
 
 ### Capturing your credentials
 
-Because this talks to private app endpoints, you need to capture a few values from a browser's network inspector rather than just typing your normal login:
+Because this talks to private app endpoints, you copy a couple of values from your browser's network inspector instead of typing your normal login.
 
-1. On a desktop browser, open **DevTools → Network tab**, filter for `/token`
-2. Log into `app-aus.sigencloud.com` (or your region's equivalent) normally
-3. Click the `token` request, open its **Payload/Body** tab, and note:
-   - `username` — your account email
-   - `password` — the **raw string** sent in the payload (this is what the app itself sends, not necessarily your literal typed password — copy it exactly as shown)
-   - `userDeviceId`
-4. From the request **Headers**, note the `Authorization` header value (looks like `Basic c2lnZW46c2lnZW4=`)
-5. Find your `station_id` by filtering for `stationId` in the network log — it'll appear as a query parameter on several requests
+**Refresh token**
+
+1. Open a **private/Incognito** browser window, open the developer tools (F12, or Cmd+Option+I on a Mac), and go to the **Network** tab
+2. Log in at `app-aus.sigencloud.com` (or your region's equivalent) as normal
+3. In the Network list, click the `token` request (the POST to `/auth/oauth/token`), open its **Response** tab, and copy the value of `refresh_token`. Copy only the value inside the quotes
+4. Paste it into the **Refresh token** field in Home Assistant and finish the setup
+5. Once Home Assistant has accepted it, **close the private window without logging out**. Logging out would end the session the token belongs to
+
+Add the integration fairly soon after logging in, while the token is still fresh. If setup says it can't connect, log in again in a new private window and copy a fresh token.
+
+**Each device needs its own refresh token, from its own login.** If you add several devices (for example two Smart Port loads, or a Smart Port load and an AC charger), repeat the steps above in a new private window for each one. Two devices sharing one token would end each other's session at the first renewal.
+
+**Station ID**
+
+Filter the Network list for `stationId`. Your 15-digit station ID appears as a query parameter on several requests.
+
+The Advanced step's **auth header** and **device ID** are pre-filled with values that work. Leave them as they are.
 
 ---
 
@@ -105,8 +117,32 @@ Because this talks to private app endpoints, you need to capture a few values fr
 
 - **Token + refresh token are persisted to disk**, tied to each device's config entry. A Home Assistant or Supervisor restart reuses the still-valid session instead of forcing a fresh login every time.
 - **Renewal uses the `refresh_token` grant**, the same mechanism Sigen's own mySigen web app uses to extend a session near its ~12-hour expiry, rather than a full username/password login.
-- **A full password login only happens** on first-ever setup, or as a fallback if a refresh token is ever rejected outright (e.g. after an extended period offline).
+- **Since mySigen 4.1 the integration doesn't use the password login for new setups.** Setups made before 4.1 still have a password stored and would fall back to it if the refresh token were rejected, but that login no longer works (see below).
 - **There's no explicit logout call.** Tokens are simply left to expire naturally rather than being proactively revoked.
+
+### The mySigen 4.1 login change
+
+With mySigen 4.1, Sigenergy changed how the web app logs in. Each password login is now signed with a key that only exists in your browser. This integration can't produce that signature, and captured values can't be reused, so Sigenergy rejects the password login the integration used to send. A new setup with a password fails at the login check with "Couldn't log in or read status".
+
+Renewing a session with a refresh token still works without the new signed fields, so the integration now starts from a refresh token copied from a browser login (see [Capturing your credentials](#capturing-your-credentials)). There's no two-factor code step in the login so far.
+
+**If you set up the integration before 4.1, you don't need to do anything.** Your setup renews its session with a refresh token roughly every 12 hours and never needs the password login.
+
+### If your setup gets logged out
+
+A session can still end. For example, the refresh token can be rejected after Home Assistant has been offline for a long time. When that happens, the device's entities become unavailable and the log shows one of these errors:
+
+- `Sigenergy Cloud Control: refresh token was rejected and no password is set` (setups made with a refresh token)
+- `Sigen auth failed or rejected` (setups made before 4.1, now that the password fallback fails)
+
+There's no "sign in again" prompt yet. To reconnect:
+
+1. Note your settings under **Configure** (poll interval, Price Spike Export, Off-Grid Control) and your Instant Manual Control duration and power limit, because deleting the device clears them
+2. **Settings → Devices & Services → Sigenergy Cloud Control**, open the device's **⋮** menu and choose **Delete**
+3. Add it again with a fresh refresh token (see [Capturing your credentials](#capturing-your-credentials)), using the **same name** as before so the entity IDs and your automations stay the same
+4. Set those settings again
+
+### Reporting problems
 
 If the mySigen app or web portal gets logged out unexpectedly, please open an issue with your Home Assistant logs (filter for "Sigenergy Cloud Control", or "Sigen Smart Port" on versions before 2.9.0) covering that period — the integration logs every login and refresh event at `info` level to help diagnose it.
 
@@ -429,7 +465,8 @@ If you have a Sigenergy AC EV Charger on the same station, it can be added as it
 
 1. **Settings → Devices & Services → Add Integration → "Sigenergy Cloud Control" → AC EV Charger**
 2. Enter:
-   - **Username / Password** — the same captured values as for a Smart Port load (see [Capturing your credentials](#capturing-your-credentials)). **If you already have a Smart Port entry for the same station, leave both blank** and its credentials are reused, so you don't need to capture them again.
+   - **Username** and **Refresh token** — as for a Smart Port load (see [Capturing your credentials](#capturing-your-credentials)). The charger needs **its own refresh token, from a separate login**, not the one your Smart Port load used
+   - **Password** — leave blank (see [The mySigen 4.1 login change](#the-mysigen-41-login-change))
    - **Station ID** and **Region** — as for a Smart Port load
    - **Charger Serial Number** — shown in the mySigen app on the charger's Device Info screen
    - **Name** and **Poll interval**
@@ -483,7 +520,7 @@ Many Sigenergy owners also run a local Modbus integration, such as [Sigenergy ES
 
 ## Multiple Devices
 
-If your Sigen setup has more than one Smart Port load (e.g. a hot water heater *and* a pool pump), **add the integration again** via Settings → Devices & Services → Add Integration, using the same credentials but a different **Load Path** for each device. Each one becomes its own Device with its own switch + mode selector.
+If your Sigen setup has more than one Smart Port load (e.g. a hot water heater *and* a pool pump), **add the integration again** via Settings → Devices & Services → Add Integration, with a different **Load Path** for each device. Each device needs its own refresh token, copied from its own login in a new private window (see [Capturing your credentials](#capturing-your-credentials)). Each one becomes its own Device with its own switch + mode selector.
 
 Finding the correct `load_path` for a second device requires digging through the network tab the same way as above — there's no automatic device-listing/discovery.
 
