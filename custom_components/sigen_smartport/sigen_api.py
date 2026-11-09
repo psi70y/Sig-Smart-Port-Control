@@ -236,7 +236,12 @@ class _SigenBaseClient:
                             expiry_str,
                         )
                         return token
-            _LOGGER.error("Sigen auth failed or rejected: %s", response.text)
+            _LOGGER.error(
+                "Sigen auth failed or rejected: %s - since mySigen 4.1 the password login no longer "
+                "works; delete this device and add it again with a refresh token "
+                "(see 'If your setup gets logged out' in the README)",
+                response.text,
+            )
         except Exception as e:  # noqa: BLE001
             _LOGGER.error("Exception during Sigen auth: %s", e)
         self._token = None
