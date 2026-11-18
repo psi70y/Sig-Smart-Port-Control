@@ -89,6 +89,12 @@ Once installed, **all setup happens in the UI** — there's no `configuration.ya
 
 The poll interval and Energy Profile refresh interval can both be changed later at any time via **Settings → Devices & Services → Sigenergy Cloud Control → Configure → Connection settings**, without needing to remove and re-add the device. On the entry that owns the station's Energy Profile, Configure also has a **Price Spike Export** page.
 
+### New-version notifications
+
+By default the integration checks GitHub once a day for a newer release. If there is one, it shows a Home Assistant notification with a link to the release notes. You get one notification per release, and it clears itself once you've updated. Only GitHub is contacted, never the Sigenergy cloud, so this doesn't affect your mySigen sessions. HACS also lists the update under **Settings → Updates**.
+
+To turn it off, untick **Notify me about new versions** under **Configure → Connection settings**. If you have several entries, turning it off in any one of them turns it off for the whole integration.
+
 ### Capturing your credentials
 
 Because this talks to private app endpoints, you copy a couple of values from your browser's network inspector instead of typing your normal login.
