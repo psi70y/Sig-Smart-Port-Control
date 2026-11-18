@@ -78,6 +78,7 @@ from .price_spike import (
     price_spike_store,
 )
 from .sigen_api import SigenSmartLoadClient, SigenAcChargerClient
+from .update_check import async_sync_update_check
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -656,6 +657,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _copy_station_area(hass, entry, had_spike_device)
             ac_coordinator.price_spike.async_start()
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        await async_sync_update_check(hass)
         return True
 
     owns_station_profile = _claim_station_profile(hass, entry)
@@ -693,6 +695,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the integration entry, reload it so the new interval takes effect
     # immediately rather than needing a full HA restart.
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    # Start the new-version check (once per HA instance) if it's wanted.
+    await async_sync_update_check(hass)
 
     return True
 
@@ -739,6 +743,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # it to another entry on the same station. A plain reload keeps it.
         if entry.disabled_by is not None:
             _release_station_profile(hass, entry)
+        # Stop the new-version check with the last entry, or start it again
+        # if the entry that had it turned off is gone.
+        await async_sync_update_check(hass)
     return unloaded
 
 

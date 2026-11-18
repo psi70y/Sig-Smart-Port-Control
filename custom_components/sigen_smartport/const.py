@@ -207,3 +207,8 @@ SPIKE_ENTITY_SUFFIXES = {
     ),
     "binary_sensor": ("price_spike_active", "price_spike_discharging"),
 }
+
+# New-version notification (see update_check.py). On by default; set per
+# entry under Configure -> Connection settings.
+CONF_UPDATE_NOTIFY = "update_notify_enabled"
+DEFAULT_UPDATE_NOTIFY = True

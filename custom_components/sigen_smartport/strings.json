@@ -91,7 +91,11 @@
           "region": "Region",
           "base_url": "API base URL (only used if Region = Custom)",
           "scan_interval": "Poll interval (seconds)",
-          "profile_refresh_days": "Refresh full Energy Profile list every (days)"
+          "profile_refresh_days": "Refresh full Energy Profile list every (days)",
+          "update_notify_enabled": "Notify me about new versions"
+        },
+        "data_description": {
+          "update_notify_enabled": "Once a day, checks GitHub for a newer release of this integration and shows a Home Assistant notification when there is one. Only GitHub is contacted. Turning this off in any entry turns it off for the whole integration."
         }
       },
       "price_spike": {

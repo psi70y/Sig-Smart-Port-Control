@@ -40,6 +40,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_PROFILE_REFRESH_DAYS,
+    CONF_UPDATE_NOTIFY,
     CONF_SPIKE_ENABLED,
     CONF_SPIKE_NOTIFY_ACTION,
     CONF_SPIKE_PRICE_ENTITY,
@@ -53,6 +54,7 @@ from .const import (
     DEFAULT_LOAD_PATH,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_PROFILE_REFRESH_DAYS,
+    DEFAULT_UPDATE_NOTIFY,
     DEFAULT_REGION,
     MIN_SCAN_INTERVAL,
     MIN_PROFILE_REFRESH_DAYS,
@@ -368,6 +370,13 @@ class SigenSmartPortOptionsFlow(config_entries.OptionsFlow):
         schema_dict[vol.Optional(CONF_PROFILE_REFRESH_DAYS, default=current_profile_refresh_days)] = (
             vol.All(vol.Coerce(int), vol.Range(min=MIN_PROFILE_REFRESH_DAYS))
         )
+
+        # New-version notification (update_check.py). Turning it off in any
+        # entry turns it off for the whole integration.
+        schema_dict[vol.Optional(
+            CONF_UPDATE_NOTIFY,
+            default=bool(entry.options.get(CONF_UPDATE_NOTIFY, DEFAULT_UPDATE_NOTIFY)),
+        )] = bool
 
         return self.async_show_form(step_id="settings", data_schema=vol.Schema(schema_dict))
 
